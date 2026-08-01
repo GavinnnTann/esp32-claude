@@ -6,8 +6,10 @@
 namespace {
 
 lv_obj_t *arc = nullptr;
+lv_obj_t *weekLabel = nullptr;
 lv_obj_t *numeralLabel = nullptr;
 lv_obj_t *ageLabel = nullptr;
+lv_obj_t *resetLabel = nullptr;
 lv_obj_t *connDot = nullptr;
 
 void format_compact(uint32_t value, char *out, size_t out_len) {
@@ -28,6 +30,20 @@ void format_age(uint32_t seconds, char *out, size_t out_len) {
   } else {
     snprintf(out, out_len, "%luh", (unsigned long)(seconds / 3600));
   }
+}
+
+// Singapore Standard Time is a fixed UTC+8 year-round (no DST), so this is
+// safe as plain integer math — no timezone database needed on the MCU.
+void format_reset_sgt(uint32_t block_reset_utc, char *out, size_t out_len) {
+  if (block_reset_utc == 0) {
+    snprintf(out, out_len, "no active block");
+    return;
+  }
+  uint32_t sg = block_reset_utc + 8 * 3600UL;
+  uint32_t sod = sg % 86400UL;
+  uint32_t hh = sod / 3600UL;
+  uint32_t mm = (sod % 3600UL) / 60UL;
+  snprintf(out, out_len, "resets %02lu:%02lu SGT", (unsigned long)hh, (unsigned long)mm);
 }
 
 }  // namespace
@@ -55,6 +71,12 @@ void ui_init() {
   lv_obj_set_style_arc_width(arc, 14, LV_PART_INDICATOR);
   lv_obj_set_style_arc_color(arc, lv_palette_main(LV_PALETTE_BLUE), LV_PART_INDICATOR);
 
+  // Small caption above the numeral: weekly total.
+  weekLabel = lv_label_create(scr);
+  lv_obj_set_style_text_font(weekLabel, &lv_font_montserrat_10, LV_PART_MAIN);
+  lv_label_set_text(weekLabel, "week --");
+  lv_obj_align(weekLabel, LV_ALIGN_CENTER, 0, -65);
+
   // Centre numeral: day_tokens, compact-formatted.
   numeralLabel = lv_label_create(scr);
   lv_obj_set_style_text_font(numeralLabel, &lv_font_montserrat_48, LV_PART_MAIN);
@@ -65,23 +87,39 @@ void ui_init() {
   ageLabel = lv_label_create(scr);
   lv_obj_set_style_text_font(ageLabel, &lv_font_montserrat_10, LV_PART_MAIN);
   lv_label_set_text(ageLabel, "waiting to connect...");
-  lv_obj_align(ageLabel, LV_ALIGN_CENTER, 0, 40);
+  lv_obj_align(ageLabel, LV_ALIGN_CENTER, 0, 38);
+
+  // Small caption: current block's reset time, in Singapore local time.
+  resetLabel = lv_label_create(scr);
+  lv_obj_set_style_text_font(resetLabel, &lv_font_montserrat_10, LV_PART_MAIN);
+  lv_label_set_text(resetLabel, "");
+  lv_obj_align(resetLabel, LV_ALIGN_CENTER, 0, 62);
 
   // Connection dot: green/yellow/red for fresh/stale/disconnected.
   connDot = lv_led_create(scr);
   lv_obj_set_size(connDot, 14, 14);
-  lv_obj_align(connDot, LV_ALIGN_BOTTOM_MID, 0, -18);
+  lv_obj_align(connDot, LV_ALIGN_BOTTOM_MID, 0, -12);
   lv_led_set_color(connDot, lv_palette_main(LV_PALETTE_GREY));
   lv_led_off(connDot);
 }
 
-void ui_set_usage(uint32_t day_tokens, uint8_t block_pct) {
+void ui_set_usage(uint32_t day_tokens, uint32_t week_tokens, uint8_t block_pct, uint32_t block_reset_utc) {
   if (block_pct > 100) block_pct = 100;
   lv_arc_set_value(arc, block_pct);
 
   char buf[16];
   format_compact(day_tokens, buf, sizeof(buf));
   lv_label_set_text(numeralLabel, buf);
+
+  char weekBuf[24];
+  char weekCompact[16];
+  format_compact(week_tokens, weekCompact, sizeof(weekCompact));
+  snprintf(weekBuf, sizeof(weekBuf), "week %s", weekCompact);
+  lv_label_set_text(weekLabel, weekBuf);
+
+  char resetBuf[24];
+  format_reset_sgt(block_reset_utc, resetBuf, sizeof(resetBuf));
+  lv_label_set_text(resetLabel, resetBuf);
 }
 
 void ui_set_connection(ConnState state, uint32_t age_seconds, bool haveData) {

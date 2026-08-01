@@ -47,41 +47,54 @@ def _parse_iso(ts: str) -> int:
     return int(datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp())
 
 
+def _sum_four(entry: dict, keys: tuple[str, str, str, str]) -> int:
+    return sum(entry.get(k, 0) for k in keys)
+
+
+_FLAT_TOKEN_KEYS = ("inputTokens", "outputTokens", "cacheCreationTokens", "cacheReadTokens")
+
+
 def read_usage_state(block_token_ceiling: Optional[int]) -> UsageState:
-    """Build the current UsageState from `ccusage daily` and `ccusage blocks`.
+    """Build the current UsageState from `ccusage daily`, `weekly`, and `blocks`.
 
     `block_token_ceiling` is the user-calibrated token count that represents
     100% of a 5-hour block (see docs/handover.md section 4, "block_pct needs
     calibration"). Pass None until it's been calibrated; block_pct will read 0.
     """
     daily = _run_ccusage("daily")
+    weekly = _run_ccusage("weekly")
     blocks = _run_ccusage("blocks")
 
     today = datetime.now().strftime("%Y-%m-%d")
     today_entry = next((d for d in daily.get("daily", []) if d.get("period") == today), None)
 
     if today_entry:
-        day_tokens = (
-            today_entry.get("inputTokens", 0)
-            + today_entry.get("outputTokens", 0)
-            + today_entry.get("cacheCreationTokens", 0)
-            + today_entry.get("cacheReadTokens", 0)
-        )
+        day_tokens = _sum_four(today_entry, _FLAT_TOKEN_KEYS)
         day_cents = round(today_entry.get("totalCost", 0.0) * 100)
     else:
         # No usage recorded yet today — genuinely zero, not an error.
         day_tokens = 0
         day_cents = 0
 
+    # `weekly` entries use the same flat schema as `daily` (verified against
+    # ccusage 20.0.19). Take the last (most recent) week bucket rather than
+    # trying to match today's date against ccusage's week-start convention
+    # (Mon vs Sun) — self-corrects the moment any usage lands in a new week.
+    week_entries = weekly.get("weekly", [])
+    if week_entries:
+        week_entry = week_entries[-1]
+        week_tokens = _sum_four(week_entry, _FLAT_TOKEN_KEYS)
+        week_cents = round(week_entry.get("totalCost", 0.0) * 100)
+    else:
+        week_tokens = 0
+        week_cents = 0
+
     active_block = next((b for b in blocks.get("blocks", []) if b.get("isActive")), None)
 
     if active_block:
         counts = active_block.get("tokenCounts", {})
-        block_tokens = (
-            counts.get("inputTokens", 0)
-            + counts.get("outputTokens", 0)
-            + counts.get("cacheCreationInputTokens", 0)
-            + counts.get("cacheReadInputTokens", 0)
+        block_tokens = _sum_four(
+            counts, ("inputTokens", "outputTokens", "cacheCreationInputTokens", "cacheReadInputTokens")
         )
         block_cents = round(active_block.get("costUSD", 0.0) * 100)
         block_reset = _parse_iso(active_block["endTime"])
@@ -101,6 +114,8 @@ def read_usage_state(block_token_ceiling: Optional[int]) -> UsageState:
         ts=int(datetime.now(timezone.utc).timestamp()),
         day_tokens=day_tokens,
         day_cents=day_cents,
+        week_tokens=week_tokens,
+        week_cents=week_cents,
         block_tokens=block_tokens,
         block_cents=block_cents,
         block_reset=block_reset,

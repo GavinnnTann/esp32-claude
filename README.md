@@ -17,10 +17,17 @@ targets).
 
 ## Status
 
-Firmware and host code are written and build/import cleanly, but **the
-display has not yet been flashed and visually verified on real hardware** —
-that's the next step (see "Build order" below). Treat anything on-screen as
-unverified until then.
+Flashed and verified end-to-end on real hardware: boots, advertises over
+BLE, host connects at full requested MTU (64 bytes), time syncs, and pushes
+real ccusage data successfully (see `docs/BUILD_PROGRESS.md` for the full
+log). **Not yet confirmed:** what the round display actually looks like —
+needs a human looking at the physical screen.
+
+Shows, on the round display: an arc gauge around the rim for `block_pct`,
+today's token count as the big centre numeral, this week's token total as a
+small caption above it, the current block's reset time in Singapore time
+(fixed UTC+8, no DST) below the numeral, and a connection-status dot
+(green/yellow/red for fresh/stale/disconnected) with an age caption.
 
 ## Firmware (`firmware/`)
 
@@ -38,7 +45,7 @@ Advertises as `esp32-claude` with one GATT service exposing two characteristics:
 
 | Characteristic | Properties | Payload |
 |---|---|---|
-| Usage State | Read, Write | `UsageState` struct (26 bytes) |
+| Usage State | Read, Write | `UsageState` struct (34 bytes, version 2) |
 | Time Sync | Write | `uint32_t` epoch seconds |
 
 **Deviation from the original spec:** `docs/handover.md` lists Usage State as
@@ -55,11 +62,11 @@ pip install -r requirements.txt
 python esp32-claude.py
 ```
 
-Reads `ccusage daily --json --offline` and `ccusage blocks --json --offline`
-every 5 minutes, packs the result into the same `UsageState` struct the
-firmware expects, and pushes it over BLE. Reconnects automatically if the
-device or the laptop's Bluetooth radio drops (lid close/sleep is normal, not
-an error).
+Reads `ccusage daily`, `ccusage weekly`, and `ccusage blocks` (all
+`--json --offline`) every 5 minutes, packs the result into the same
+`UsageState` struct the firmware expects, and pushes it over BLE. Reconnects
+automatically if the device or the laptop's Bluetooth radio drops (lid
+close/sleep is normal, not an error).
 
 Pinned against `ccusage 20.0.19` — schemas have already drifted once between
 versions during this project (see `host/ccusage_reader.py` docstring); re-verify

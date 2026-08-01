@@ -78,7 +78,7 @@ void loop() {
     // Assumes the host writes Time Sync before UsageState on every connect
     // (host/ble_client.py does this), so the clock is already synced here.
     lastStateEpoch = ble_server_synced_epoch();
-    ui_set_usage(lastState.day_tokens, lastState.block_pct);
+    ui_set_usage(lastState.day_tokens, lastState.week_tokens, lastState.block_pct, lastState.block_reset);
   }
 
   bool connected = ble_server_is_connected();
