@@ -9,4 +9,6 @@ __pycache__/
 host/venv/
 host/.venv/
 
+.claude/
+
 docs/

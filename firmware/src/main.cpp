@@ -16,12 +16,19 @@ static const uint32_t STALE_AFTER_S = 15 * 60;
 static TFT_eSPI tft(SCREEN_WIDTH, SCREEN_HEIGHT);
 
 /* Partial-render draw buffer: 1/10th of the screen. No PSRAM on this board (handover.md #2),
- * so a full 240x240x16bpp framebuffer (~115KB) is not an option. */
-static uint8_t draw_buf[SCREEN_WIDTH * (SCREEN_HEIGHT / 10) * (LV_COLOR_DEPTH / 8)];
+ * so a full 240x240x16bpp framebuffer (~115KB) is not an option.
+ * alignas() is required: a plain uint8_t[] only guarantees 1-byte alignment, but
+ * lv_display_set_buffers() asserts the pointer is aligned to LV_DRAW_BUF_ALIGN (4). */
+alignas(LV_DRAW_BUF_ALIGN) static uint8_t draw_buf[SCREEN_WIDTH * (SCREEN_HEIGHT / 10) * (LV_COLOR_DEPTH / 8)];
 
 static UsageState lastState{};
 static bool haveState = false;
 static uint32_t lastStateEpoch = 0;
+
+static void lv_log_print_cb(lv_log_level_t level, const char *buf) {
+  Serial.print("[lvgl] ");
+  Serial.println(buf);
+}
 
 static void display_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map) {
   uint32_t w = area->x2 - area->x1 + 1;
@@ -37,19 +44,30 @@ static void display_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t 
 
 void setup() {
   Serial.begin(115200);
+  delay(300);  // let the USB-serial bridge settle before the first print
+  Serial.println("[boot] serial up");
 
+  Serial.println("[boot] tft.begin()...");
   tft.begin();
+  Serial.println("[boot] tft.begin() done");
   tft.setRotation(LVGL_TFT_ROTATION);
+  Serial.println("[boot] tft.setRotation() done");
 
   lv_init();
+  lv_log_register_print_cb(lv_log_print_cb);
   lv_tick_set_cb(millis);
+  Serial.println("[boot] lv_init() done");
 
   lv_display_t *disp = lv_display_create(SCREEN_WIDTH, SCREEN_HEIGHT);
   lv_display_set_flush_cb(disp, display_flush_cb);
   lv_display_set_buffers(disp, draw_buf, NULL, sizeof(draw_buf), LV_DISPLAY_RENDER_MODE_PARTIAL);
+  Serial.println("[boot] lv_display created");
 
   ui_init();
+  Serial.println("[boot] ui_init() done");
+
   ble_server_init();
+  Serial.println("[boot] ble_server_init() done, entering loop()");
 }
 
 void loop() {

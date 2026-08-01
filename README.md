@@ -81,8 +81,13 @@ actually spent on a subscription — label any UI accordingly.
 
 ### Autostart (Windows)
 
-Not yet wired up — planned via Task Scheduler (run `python esp32-claude.py`
-at login, no window). See `docs/BUILD_PROGRESS.md` for status.
+```
+powershell -ExecutionPolicy Bypass -File host\install_autostart.ps1
+```
+
+Registers a per-user Scheduled Task (`esp32-claude-host`) that runs the host
+script at logon. Remove with
+`Unregister-ScheduledTask -TaskName esp32-claude-host -Confirm:$false`.
 
 ## Build order
 

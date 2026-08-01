@@ -7,10 +7,16 @@ Usage: python esp32-claude.py
 from __future__ import annotations
 
 import asyncio
+import sys
 
 import ble_client
 import config
 from ccusage_reader import read_usage_state
+
+# Force line-buffered stdout: when this runs unattended (piped to a log file,
+# or under Task Scheduler) Python otherwise fully block-buffers stdout, so log
+# lines sit invisible in memory for a long time instead of showing up as they happen.
+sys.stdout.reconfigure(line_buffering=True)
 
 
 def get_state():
