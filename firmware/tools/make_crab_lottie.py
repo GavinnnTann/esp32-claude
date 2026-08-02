@@ -39,7 +39,7 @@ EYE_DARK = [0.106, 0.098, 0.094]
 # 112px round display focused/sleepy were indistinguishable and happy read as
 # neutral. Brows, eye shape and props do the work now; size alone does not.
 #
-#   eye      : "open" | "narrow" | "happy" (^^ arcs) | "droop" | "closed"
+#   eye      : "open" | "squint" | "narrow" | "happy" (^^ arcs) | "droop" | "closed"
 #   brow     : None | "angry" (inner ends down) | "tired" (outer ends down) | "raised"
 #   pupil_dx : pupil offset, for looking off to one side
 #   mouth    : "grin" | "flat" | "small" | "open" | "smile"
@@ -73,10 +73,13 @@ MOODS: dict[str, dict] = {
                     speed=0.8, guitar=True),
     # Heads-down at a desk: laptop open, claws typing, coffee steaming. The
     # crab is raised (body_dy) so the desk and laptop occupy the lower third.
-    # No brows and a smile: with "angry" brows this was a scowl, and it borrowed
-    # focused's whole face. Happily absorbed in the work reads better, and the
-    # desk carries the identification on its own.
-    "working": dict(eye="open",   brow=None,    pupil_dx=0, mouth="smile", wave=0,  bob=1,
+    # Half-lidded and smiling under neutral brows: absorbed in the work. Two
+    # earlier tries were worse - "angry" brows made it a scowl and borrowed
+    # focused's whole face, then wide-open eyes with no brows read as a stare.
+    # The desk carries the identification, so the face only has to look calm.
+    # bob=0 deliberately: the typing claws and the steam already carry the
+    # motion, and the body bob is what makes an asset expensive (see below).
+    "working": dict(eye="squint", brow="raised", pupil_dx=0, mouth="smile", wave=0,  bob=0,
                     speed=0.9, desk=True, body_dy=20),
 }
 
@@ -224,13 +227,26 @@ def build(mood: str) -> dict:
         for dx in (-10, 10):
             face.append(group(f"lid{dx}", [rect(12, 3, 1), fill(EYE_DARK)], (cx + dx, 43 - dy)))
     else:
-        eye_h = {"open": 11, "narrow": 6, "droop": 9}[eye]
+        # "squint" is a short eye with a WIDE pupil. The width matters: a short
+        # eye with the standard 5px pupil is still a small dark dot swimming in
+        # white, which reads as a stare, not as half-closed.
+        #
+        # The obvious alternative - a shell-coloured lid over a full-height eye,
+        # the way "droop" does it - is far too expensive here. Those lids
+        # overlap the eye whites, and ThorVG composites overlapping fills: four
+        # extra shapes cost ~17KB of heap at parse time and reliably exhausted
+        # the device on the desk scene. Compare "chill", which adds raised brows
+        # (no overlap) for almost nothing. Avoid overlapping fills on any mood
+        # that also carries a prop scene.
+        eye_h = {"open": 11, "squint": 7, "narrow": 6, "droop": 9}[eye]
+        pupil_w = 7 if eye == "squint" else 5
         pdx = m["pupil_dx"]
         # Droop keeps a full-height eye but covers the top half with a lid, so
-        # you read "eyelid", not "small eye".
+        # you read "eyelid", not "small eye". It can afford the overlap because
+        # it has no prop scene competing for heap.
         pupil_y = 43 if eye == "droop" else 41
         for dx in (-10, 10):
-            face.append(group(f"pupil{dx}", [rect(5, min(5, eye_h - 1), 2), fill(EYE_DARK)],
+            face.append(group(f"pupil{dx}", [rect(pupil_w, min(5, eye_h - 1), 2), fill(EYE_DARK)],
                               (cx + dx + pdx, pupil_y - dy)))
         if eye == "droop":
             for dx in (-10, 10):
@@ -402,11 +418,19 @@ def build(mood: str) -> dict:
     else:
         shapes = [*zzz, *mouths, *face, shell, *limbs, *legs]
 
-    # Face and shell bob together — animating only the shell would leave the
+    # Face and shell bob together - animating only the shell would leave the
     # face hanging. Selected by identity rather than by slice index, since the
-    # two orderings above put them in different places.
-    for g in [*mouths, *face, shell]:
-        g["it"][-1]["p"] = bob_for(g["it"][-1]["p"]["k"])
+    # orderings above put them in different places.
+    #
+    # bob=0 skips the keyframes entirely rather than emitting a flat animation.
+    # This is the single most expensive thing in an asset: every face group
+    # carries its own 5-keyframe position track, so each extra brow or eyelid
+    # costs ~670B, not the ~350B the shapes themselves take. Dropping the bob
+    # took the desk scene from 15,317B (which exhausted the heap and wedged the
+    # device) to well under the bed scene.
+    if m["bob"]:
+        for g in [*mouths, *face, shell]:
+            g["it"][-1]["p"] = bob_for(g["it"][-1]["p"]["k"])
 
     layer = {
         "ddd": 0, "ind": 1, "ty": 4, "nm": f"crab_{mood}", "sr": m["speed"],

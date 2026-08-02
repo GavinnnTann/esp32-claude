@@ -596,7 +596,16 @@ void ui_init() {
   // render_view() otherwise only runs on a host update or a button press, so
   // demoMood()'s clock advanced but nothing ever read it - the demo sat on one
   // mood forever. Give it a tick of its own.
-  lv_timer_create([](lv_timer_t *) { render_view(); }, 500, nullptr);
+  lv_timer_create([](lv_timer_t *) {
+    render_view();
+    // Report AFTER a render has happened. The figure logged inside apply_mood
+    // is post-parse but pre-render, and ThorVG allocates again while
+    // rasterising - that gap is what made a 1.9KB mask allocation appear to
+    // fail with 10KB "free".
+    Serial.printf("[demo] mood %d  heap %u B  largest %u B  min ever %u B\n", (int)currentMood,
+                  (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap(),
+                  (unsigned)ESP.getMinFreeHeap());
+  }, 1000, nullptr);
   // Force the mascot view: the demo is pointless on a text page.
   currentView = View::Mascot;
   render_view();
