@@ -26,6 +26,11 @@ from PIL import Image, ImageDraw
 
 MOODS = ["happy", "focused", "chill", "working", "sleepy", "asleep", "rocking"]
 SCALE = 3
+# The combined grid is rendered at full SCALE then downsampled, so it stays
+# crisp while keeping the GIF small enough to sit at the top of a README.
+GRID_SCALE = 2
+GRID_FRAMES = 40
+GRID_FPS = 20
 STAGE_BG = (46, 24, 81, 255)
 STAGE_GRID = (152, 80, 229)
 
@@ -99,19 +104,51 @@ def main(argv):
     # Per-mood animated GIFs.
     for m, doc in docs.items():
         stage = m == "rocking"
+        step = 2
         frames = [render(doc, f, stage).convert("P", palette=Image.ADAPTIVE)
-                  for f in range(0, doc["op"], 2)]
+                  for f in range(0, doc["op"], step)]
+        # Derive playback from the real frame rate. This was hardcoded to a 2s
+        # total, which was fine while every mood looped in 2s but played the
+        # longer desk loop 3x too fast.
         frames[0].save(out / f"crab-{m}.gif", save_all=True, append_images=frames[1:],
-                       duration=int(2000 / len(frames)), loop=0, disposal=2)
+                       duration=int(1000 * step / doc["fr"]), loop=0, disposal=2)
         print(f"  crab-{m}.gif")
 
-    # Contact sheet of all moods, for the README table's header image.
+    # Static contact sheet, kept as a fallback for renderers that block GIFs.
     w = docs["happy"]["w"] * SCALE
     sheet = Image.new("RGBA", (w * len(MOODS), w), (10, 10, 10, 255))
     for i, m in enumerate(MOODS):
         sheet.paste(render(docs[m], 4, m == "rocking"), (i * w, 0))
     sheet.save(out / "crab-moods.png")
     print("  crab-moods.png")
+
+    # Animated grid of every mood at once - the README's header image.
+    #
+    # Each mood is advanced through its OWN loop length so all of them complete
+    # exactly one cycle over the GIF and it repeats seamlessly. Moods no longer
+    # share a loop length (the desk scene runs 180 frames so its coffee break
+    # is occasional rather than constant), so playing them on a common clock
+    # would leave most of the grid jumping at the wrap.
+    cell = docs["happy"]["w"] * GRID_SCALE
+    cols = 4
+    rows = (len(MOODS) + cols - 1) // cols
+    pad = 16  # room for the caption under each cell
+    grid_frames = []
+    for i in range(GRID_FRAMES):
+        u = i / GRID_FRAMES  # position through every mood's own loop
+        img = Image.new("RGBA", (cell * cols, (cell + pad) * rows), (10, 10, 10, 255))
+        dr = ImageDraw.Draw(img)
+        for j, m in enumerate(MOODS):
+            doc = docs[m]
+            frame = render(doc, u * doc["op"], m == "rocking")
+            x, y = (j % cols) * cell, (j // cols) * (cell + pad)
+            img.paste(frame.resize((cell, cell), Image.NEAREST), (x, y))
+            dr.text((x + 4, y + cell + 3), m, fill=(200, 200, 200, 255))
+        grid_frames.append(img.convert("P", palette=Image.ADAPTIVE))
+    grid_frames[0].save(out / "crab-moods.gif", save_all=True,
+                        append_images=grid_frames[1:],
+                        duration=int(1000 / GRID_FPS), loop=0, disposal=2)
+    print(f"  crab-moods.gif ({(out / 'crab-moods.gif').stat().st_size // 1024} KB)")
     return 0
 
 
