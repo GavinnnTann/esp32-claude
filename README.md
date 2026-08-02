@@ -22,23 +22,23 @@ connects at the full requested MTU of 247, time syncs, and pushes live data
 whose percentages match Claude Code's own Account & Usage panel exactly
 (see `docs/BUILD_PROGRESS.md` for the full log).
 
-Currently a **verbose all-fields layout** — every field on one screen, no
-summarising, pending a proper UI once the board's two navigation buttons are
-wired up (their GPIOs aren't known yet):
+Three views, cycled with the two buttons (GPIO4 up / GPIO19 down):
 
 ```
-      opus-5 / xhigh
-   sess 35%  week 11%
-   day   141.0M  $26.19
-   week  662.7M  $49.81
-   block  75.9M  $10.81
-   resets 12:20 SGT
-   updated 2m ago    [dot]
+   SESSION            WEEKLY             TODAY
+     35%                11%              141.0M
+  57.8M tok $10.81   645.1M tok $49.81  today $26.19
+  resets 12:20 SGT   resets 05:00 +5d   opus-5 / xhigh
+      • ○ ○              ○ • ○              ○ ○ •
 ```
 
-Plus an arc gauge around the rim tracking the real session percentage,
-colored green / orange / red at 70% / 90% thresholds like Claude.ai's usage
-bar. The dot is green/yellow/red for fresh/stale/disconnected.
+An arc around the rim tracks the percentage, coloured green / orange / red at
+70% / 90% like Claude.ai's own usage bar. A dot at the top shows connection
+state (green fresh / yellow stale / red disconnected); the dots at the bottom
+show which view you're on.
+
+The percentages are the **real** figures from Claude Code's own cache, not an
+estimate — see "Quota percentages" below.
 
 ## Firmware (`firmware/`)
 
