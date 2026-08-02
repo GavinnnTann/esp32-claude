@@ -71,12 +71,30 @@ MOODS: dict[str, dict] = {
     # Code itself shows at that level. One claw pins the neck, the other strums.
     "rocking": dict(eye="narrow", brow="angry", pupil_dx=0, mouth="open",  wave=0,  bob=2,
                     speed=0.8, guitar=True),
+    # Heads-down at a desk: laptop open, claws typing, coffee steaming. The
+    # crab is raised (body_dy) so the desk and laptop occupy the lower third.
+    # No brows and a smile: with "angry" brows this was a scowl, and it borrowed
+    # focused's whole face. Happily absorbed in the work reads better, and the
+    # desk carries the identification on its own.
+    "working": dict(eye="open",   brow=None,    pupil_dx=0, mouth="smile", wave=0,  bob=1,
+                    speed=0.9, desk=True, body_dy=20),
 }
 
 ZZZ_COLOR = [0.949, 0.949, 0.980]
 PILLOW = [0.925, 0.906, 0.859]
 BLANKET = [0.259, 0.408, 0.729]
 BLANKET_DARK = [0.192, 0.310, 0.588]
+
+# Desk scene. Cool greys and a teal screen glow so the laptop separates from
+# the orange crab, the same reasoning that drove the guitar's colour.
+DESK = [0.298, 0.204, 0.157]
+DESK_EDGE = [0.216, 0.145, 0.110]
+LAPTOP = [0.400, 0.435, 0.478]
+LAPTOP_DARK = [0.267, 0.298, 0.341]
+SCREEN_GLOW = [0.400, 0.855, 0.855]
+MUG = [0.949, 0.949, 0.965]
+COFFEE = [0.322, 0.192, 0.129]
+STEAM = [0.878, 0.902, 0.925]
 
 # Teal body, cream neck. Wood-brown was the obvious choice and the wrong one:
 # against an orange crab it read as another shade of crab. Teal is orange's
@@ -173,6 +191,10 @@ def zzz_groups(count: int, dur: float) -> list:
 def build(mood: str) -> dict:
     m = MOODS[mood]
     cx = W / 2
+    # Shifts the whole crab up so a desk scene can occupy the lower third.
+    # Applied at construction rather than as a layer transform so the bob
+    # animation, which is built from these same base positions, follows it.
+    dy = m.get("body_dy", 0)
     dur = DUR
     q = [0, dur * 0.25, dur * 0.5, dur * 0.75, dur]
 
@@ -197,10 +219,10 @@ def build(mood: str) -> dict:
         for dx in (-10, 10):
             for side, tilt in ((-1, -32), (1, 32)):
                 face.append(group(f"arc{dx}{side}", [rect(7, 3, 1), fill(EYE_DARK)],
-                                  (cx + dx + side * 2.6, 42), static(tilt)))
+                                  (cx + dx + side * 2.6, 42 - dy), static(tilt)))
     elif eye == "closed":
         for dx in (-10, 10):
-            face.append(group(f"lid{dx}", [rect(12, 3, 1), fill(EYE_DARK)], (cx + dx, 43)))
+            face.append(group(f"lid{dx}", [rect(12, 3, 1), fill(EYE_DARK)], (cx + dx, 43 - dy)))
     else:
         eye_h = {"open": 11, "narrow": 6, "droop": 9}[eye]
         pdx = m["pupil_dx"]
@@ -209,12 +231,12 @@ def build(mood: str) -> dict:
         pupil_y = 43 if eye == "droop" else 41
         for dx in (-10, 10):
             face.append(group(f"pupil{dx}", [rect(5, min(5, eye_h - 1), 2), fill(EYE_DARK)],
-                              (cx + dx + pdx, pupil_y)))
+                              (cx + dx + pdx, pupil_y - dy)))
         if eye == "droop":
             for dx in (-10, 10):
-                face.append(group(f"droop{dx}", [rect(12, 5, 2), fill(SHELL)], (cx + dx, 38)))
+                face.append(group(f"droop{dx}", [rect(12, 5, 2), fill(SHELL)], (cx + dx, 38 - dy)))
         for dx in (-10, 10):
-            face.append(group(f"eye{dx}", [rect(11, eye_h, 4), fill(EYE_WHITE)], (cx + dx, 41)))
+            face.append(group(f"eye{dx}", [rect(11, eye_h, 4), fill(EYE_WHITE)], (cx + dx, 41 - dy)))
 
     # Brows carry more expression than eye size does, especially at this size.
     #
@@ -229,25 +251,37 @@ def build(mood: str) -> dict:
         brow_y = {"angry": 33, "tired": 32, "raised": 30}[brow]
         for side, dx in ((-1, -10), (1, 10)):
             face.append(group(f"brow{dx}", [rect(12, 3, 1), fill(SHELL_DARK)],
-                              (cx + dx, brow_y), static(tilt * side)))
+                              (cx + dx, brow_y - dy), static(tilt * side)))
 
     if m.get("blush"):
         for dx in (-18, 18):
-            face.append(group(f"blush{dx}", [rect(7, 4, 2), fill(SHELL_DARK)], (cx + dx, 48)))
+            face.append(group(f"blush{dx}", [rect(7, 4, 2), fill(SHELL_DARK)], (cx + dx, 48 - dy)))
 
-    mouth_shape = {
-        "grin":  (18, 7, 3, 52),   # wide and tall — pairs with the arc eyes
-        "smile": (13, 4, 2, 51),
-        "flat":  (11, 3, 1, 51),
-        "small": (7, 3, 1, 51),
-        "open":  (9, 7, 3, 51),
-    }[m["mouth"]]
-    mouth = group("mouth", [rect(*mouth_shape[:3]), fill(SHELL_DARK)], (cx, mouth_shape[3]))
+    if m["mouth"] == "smile":
+        # Two bars angled up at the outer ends, not one wide rect. A rect only
+        # ever reads as a neutral bar however thin it is, so "smile" and "flat"
+        # were telling the same story and a smiling crab looked expressionless.
+        # Sign is the same trap as the brows. Rotation is clockwise, so +angle
+        # drives a bar's RIGHT end down: the left bar therefore needs +16 to
+        # lift its outer end and the right bar -16. Inverted, this is a frown -
+        # compare the happy arc eyes, which use the opposite sign to make "^^".
+        mouths = [group(f"smile{side}", [rect(8, 3, 1), fill(SHELL_DARK)],
+                        (cx + side * 3.2, 51 - dy), static(-side * 16))
+                  for side in (-1, 1)]
+    else:
+        mouth_shape = {
+            "grin":  (18, 7, 3, 52),   # wide and tall - pairs with the arc eyes
+            "flat":  (11, 3, 1, 51),
+            "small": (7, 3, 1, 51),
+            "open":  (9, 7, 3, 51),
+        }[m["mouth"]]
+        mouths = [group("mouth", [rect(*mouth_shape[:3]), fill(SHELL_DARK)],
+                        (cx, mouth_shape[3] - dy))]
 
-    legs = [group(f"leg{i}", [rect(5, 7, 2), fill(SHELL_DARK)], (cx + dx, 61))
+    legs = [group(f"leg{i}", [rect(5, 7, 2), fill(SHELL_DARK)], (cx + dx, 61 - dy))
             for i, dx in enumerate((-14, -5, 5, 14))]
 
-    shell = group("shell", [rect(44, 32, 11), fill(SHELL)], (cx, 44))
+    shell = group("shell", [rect(44, 32, 11), fill(SHELL)], (cx, 44 - dy))
 
     if m.get("guitar"):
         # Strum runs at 4x the loop rate — a slow strum reads as waving, which
@@ -275,9 +309,9 @@ def build(mood: str) -> dict:
         claw_y = 50 if m["wave"] == 0 else 44
         limbs = [
             group("claw_l", [rect(16, 14, 5, offset=(-8, 0)), fill(SHELL_DARK)],
-                  (cx - 18, claw_y), None if m["wave"] == 0 else swing(1)),
+                  (cx - 18, claw_y - dy), None if m["wave"] == 0 else swing(1)),
             group("claw_r", [rect(16, 14, 5, offset=(8, 0)), fill(SHELL_DARK)],
-                  (cx + 18, claw_y), None if m["wave"] == 0 else swing(-1)),
+                  (cx + 18, claw_y - dy), None if m["wave"] == 0 else swing(-1)),
         ]
 
     # NOTE: the purple stage and its pulsing grid are NOT drawn here. They live
@@ -287,6 +321,58 @@ def build(mood: str) -> dict:
     # rasterise them, and keeps this animation's shape count down.
 
     zzz = zzz_groups(m["zzz"], dur) if m.get("zzz") else []
+
+    # Desk scene: laptop lid in front of the raised body, claws tapping on the
+    # base, a steaming mug beside it.
+    desk_front, desk_back = [], []
+    if m.get("desk"):
+        # Claws alternate so it reads as typing rather than one arm waving.
+        # Eight strokes per loop, not four: at four the rise and fall are slow
+        # enough to read as a wave, which is what "rocking" already looks like.
+        taps = 8
+        tap_a = anim([(dur * i / taps, [0 if i % 2 == 0 else -4])
+                      for i in range(taps + 1)])
+        tap_b = anim([(dur * i / taps, [-4 if i % 2 == 0 else 0])
+                      for i in range(taps + 1)])
+
+        def tap(base_x, base_y, track):
+            g = group(f"typeclaw{base_x}", [rect(9, 8, 3), fill(SHELL_DARK)], (base_x, base_y))
+            g["it"][-1]["p"] = anim([(t, [base_x, base_y + v[0]])
+                                     for (t, v) in zip([k["t"] for k in track["k"]],
+                                                       [k["s"] for k in track["k"]])])
+            return g
+
+        # Steam: two short marks fading in turn above the mug.
+        def puff(i):
+            slot = dur / 2
+            t_on = i * slot
+            pts = [(0, [0])] if t_on > 0 else []
+            pts += [(t_on, [0]), (t_on + slot * 0.4, [85]), (t_on + slot * 0.95, [0])]
+            if pts[-1][0] < dur:
+                pts.append((dur, [0]))
+            return anim(pts)
+
+        # Front to back. Claws must come BEFORE the lid and base or they
+        # render on top of the screen instead of resting on the keyboard.
+        # The laptop is centred on cx and its lid is narrower than the 44px
+        # shell, so a few px of crab shows either side. Off-centre or full
+        # width, the head reads as balanced ON the laptop rather than behind it.
+        desk_front = [
+            group("coffee", [rect(9, 3, 1), fill(COFFEE)], (12, 53)),
+            group("mug", [rect(12, 11, 3), fill(MUG)], (12, 56)),
+            group("handle", [rect(4, 6, 2), fill(MUG)], (20, 56)),
+            tap(cx - 12, 59, tap_a),
+            tap(cx + 12, 59, tap_b),
+            group("lapbase", [rect(40, 5, 2), fill(LAPTOP)], (cx, 60)),
+            group("lapglow", [rect(28, 2, 1), fill(SCREEN_GLOW)], (cx, 43)),
+            group("lapdid", [rect(34, 24, 3), fill(LAPTOP_DARK)], (cx, 46)),
+        ]
+        desk_back = [
+            group("steam1", [rect(3, 7, 1), fill(STEAM, puff(0))], (9, 44)),
+            group("steam2", [rect(3, 8, 1), fill(STEAM, puff(1))], (15, 41)),
+            group("desk", [rect(80, 16, 0), fill(DESK)], (cx, 72)),
+            group("deskedge", [rect(80, 3, 0), fill(DESK_EDGE)], (cx, 63)),
+        ]
 
     # Bed scene: blanket in front of the body, pillow behind the head. Turns
     # "eyes shut" into "gone to bed", which is the point — this is the state
@@ -307,16 +393,19 @@ def build(mood: str) -> dict:
     # in front of the shell; bare claws tuck behind it. The blanket covers the
     # body but not the face; the pillow sits behind everything but the base.
     if m.get("guitar"):
-        shapes = [*zzz, mouth, *face, *limbs, shell, *legs]
+        shapes = [*zzz, *mouths, *face, *limbs, shell, *legs]
     elif m.get("bed"):
-        shapes = [*zzz, mouth, *face, *bed_front, shell, *limbs, *legs, *bed_back]
+        shapes = [*zzz, *mouths, *face, *bed_front, shell, *limbs, *legs, *bed_back]
+    elif m.get("desk"):
+        # Face above the lid, laptop/mug in front of the body, desk behind all.
+        shapes = [*mouths, *face, *desk_front, shell, *legs, *desk_back]
     else:
-        shapes = [*zzz, mouth, *face, shell, *limbs, *legs]
+        shapes = [*zzz, *mouths, *face, shell, *limbs, *legs]
 
     # Face and shell bob together — animating only the shell would leave the
     # face hanging. Selected by identity rather than by slice index, since the
     # two orderings above put them in different places.
-    for g in [mouth, *face, shell]:
+    for g in [*mouths, *face, shell]:
         g["it"][-1]["p"] = bob_for(g["it"][-1]["p"]["k"])
 
     layer = {

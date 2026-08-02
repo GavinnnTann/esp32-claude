@@ -24,7 +24,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-MOODS = ["happy", "focused", "chill", "sleepy", "asleep", "rocking"]
+MOODS = ["happy", "focused", "chill", "working", "sleepy", "asleep", "rocking"]
 SCALE = 3
 STAGE_BG = (46, 24, 81, 255)
 STAGE_GRID = (152, 80, 229)

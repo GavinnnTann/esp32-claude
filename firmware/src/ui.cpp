@@ -39,13 +39,21 @@ lv_anim_t *gridAnim = nullptr;
 const lv_color_t kStageBg = lv_color_hex(0x2E1851);
 const lv_color_t kStageGrid = lv_color_hex(0x9850E5);
 
-// 104x104 = 43,264 bytes of ARGB canvas. Still ~30% larger than the original
-// 80px, but 112 proved too greedy: with the bed-scene animation loaded the
-// heap fell to 15.3KB free / 10.2KB largest block, which runs but leaves no
-// margin for a BLE reconnect on a device meant to sit on a desk for days.
-// The 8px difference is barely visible; the 7KB it returns is not.
-// Check the [mem] line before growing this.
-constexpr int32_t kMascotSide = 104;
+// 96x96 = 36,864 bytes, and it must be ARGB8888 - lv_lottie_set_buffer hands
+// the pointer straight to tvg_swcanvas_set_target as ARGB8888, so there is no
+// 16-bit option to halve it. This is the single largest allocation in the
+// firmware, which makes it the only real lever on headroom.
+//
+// 112 and 104 both proved too greedy. The trap is that the heap figure logged
+// after apply_mood() is measured post-parse but PRE-render: ThorVG then
+// allocates again during rasterisation, in proportion to painted area. The
+// desk scene fills far more of the canvas than the bed scene does, so it costs
+// ~9KB more at draw time despite being the SMALLER asset - and at 104 that
+// was enough to starve the arc's anti-aliasing mask
+// (circ_calc_aa4: cir_x != NULL) and wedge the device on LVGL's assert.
+// Judge headroom by the largest free block while the desk scene is drawing,
+// not by asset size. Check the [mem] line before growing this.
+constexpr int32_t kMascotSide = 96;
 constexpr int32_t SCREEN_SIDE = 240;
 
 // Quota thresholds at which the crab starts winding down. Deliberately below
@@ -96,7 +104,10 @@ CrabMood mood_for(const UsageState &s) {
   if (contains(s.effort, sizeof(s.effort), "xhigh")) return CRAB_ROCKING;
   if (contains(s.effort, sizeof(s.effort), "high")) return CRAB_FOCUSED;
   if (contains(s.model, sizeof(s.model), "haiku")) return CRAB_HAPPY;
-  if (contains(s.model, sizeof(s.model), "opus")) return CRAB_FOCUSED;
+  // Opus gets the desk scene rather than sharing FOCUSED with high effort.
+  // Every mood now has exactly one cause, so what you see names what is
+  // happening - two triggers for one face made the display ambiguous.
+  if (contains(s.model, sizeof(s.model), "opus")) return CRAB_WORKING;
   return CRAB_CHILL;
 }
 
@@ -145,7 +156,11 @@ void apply_mood(CrabMood mood) {
   }
 
   currentMood = mood;
-  Serial.printf("[ui] crab mood -> %d (heap %u B)\n", (int)mood, (unsigned)ESP.getFreeHeap());
+  // Largest free block, not just total free: the mascot buffer and ThorVG's
+  // parse allocations both need contiguous memory, so that is the number that
+  // decides whether the next mood loads at all.
+  Serial.printf("[ui] crab mood -> %d (%u B asset, heap %u B, largest %u B)\n", (int)mood,
+                (unsigned)a.size, (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
 }
 
 View currentView = View::Session;
@@ -332,14 +347,28 @@ void render_view() {
   refresh_page_dots();
 
   bool onMascot = (currentView == View::Mascot);
+
+  // Work out the target mood BEFORE touching anything, so the stage can be
+  // torn down first (see below).
+  bool wantMood = true;
 #ifdef CRAB_MOOD_DEMO
   // Build with -D CRAB_MOOD_DEMO=1 to cycle every mood on a timer. Real quota
   // states take hours to reach, so this is the only practical way to confirm
-  // each animation loads and renders within the heap budget.
-  if (haveCached) apply_mood(demoMood());
+  // each animation loads and renders within the heap budget. Deliberately does
+  // NOT wait for haveCached - the demo has to work with no host connected.
+  CrabMood target = demoMood();
 #else
-  if (haveCached) apply_mood(mood_for(cachedState));
+  CrabMood target = haveCached ? mood_for(cachedState) : currentMood;
+  wantMood = haveCached;
 #endif
+
+  // Release the stage BEFORE parsing the next animation, not after. ThorVG's
+  // Lottie parse is the peak allocation in the whole firmware, and leaving the
+  // outgoing stage's full-screen background and eight grid bars alive across it
+  // cost ~9KB at exactly the wrong moment - enough that the arc's
+  // anti-aliasing mask then failed to allocate.
+  if (target != CRAB_ROCKING || !onMascot) set_stage_active(false);
+  if (wantMood) apply_mood(target);
   set_mascot_active(onMascot);
   set_stage_active(onMascot && currentMood == CRAB_ROCKING);
 
@@ -562,6 +591,16 @@ void ui_init() {
 
   refresh_page_dots();
   render_view();  // applies the initial show/hide + paused state
+
+#ifdef CRAB_MOOD_DEMO
+  // render_view() otherwise only runs on a host update or a button press, so
+  // demoMood()'s clock advanced but nothing ever read it - the demo sat on one
+  // mood forever. Give it a tick of its own.
+  lv_timer_create([](lv_timer_t *) { render_view(); }, 500, nullptr);
+  // Force the mascot view: the demo is pointless on a text page.
+  currentView = View::Mascot;
+  render_view();
+#endif
 }
 
 void ui_set_usage(const UsageState &state) {

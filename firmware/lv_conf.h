@@ -40,7 +40,16 @@
  * - LV_STDLIB_RTTHREAD:    RT-Thread implementation
  * - LV_STDLIB_CUSTOM:      Implement the functions externally
  */
-#define LV_USE_STDLIB_MALLOC    LV_STDLIB_BUILTIN
+/* CLIB, not BUILTIN. The built-in allocator carves a FIXED LV_MEM_SIZE pool
+ * (64KB here) and serves every lv_malloc from it - widgets, the 24KB layer
+ * buffer, ThorVG's Lottie parse, and the arc's anti-aliasing masks all compete
+ * inside that one pool. ESP.getFreeHeap() cannot see it, so the device
+ * reported ~22KB free while LVGL was actually out of memory, and the arc died
+ * with `circ_calc_aa4: Asserted at expression: cir_x != NULL` whenever a large
+ * mood was loaded. Routing lv_malloc to the ESP32 heap removes the artificial
+ * ceiling AND returns the 64KB static pool, which was the single biggest
+ * consumer of dram0_0_seg. */
+#define LV_USE_STDLIB_MALLOC    LV_STDLIB_CLIB
 
 /** Possible values
  * - LV_STDLIB_BUILTIN:     LVGL's built in implementation
