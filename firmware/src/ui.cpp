@@ -39,10 +39,13 @@ lv_anim_t *gridAnim = nullptr;
 const lv_color_t kStageBg = lv_color_hex(0x2E1851);
 const lv_color_t kStageGrid = lv_color_hex(0x9850E5);
 
-// 80x80 rather than 120x120: measured on this board, 80 gives ~19fps with 59KB
-// heap to spare, where 120 gives ~14fps with only 26KB. CPU sits ~90% either
-// way (LVGL renders as fast as it can), so the extra size buys nothing.
-constexpr int32_t kMascotSide = 80;
+// 112x112 = 50,176 bytes of ARGB canvas. Sized up from 80 because the view
+// looked sparse once the stage filled the panel. This is close to the
+// practical ceiling: the buffer is allocated at init while the heap is still
+// mostly free, but after BLE connects and ThorVG loads the largest animation
+// there is only ~18KB of contiguous heap left. Check the [mem] line before
+// growing it further.
+constexpr int32_t kMascotSide = 112;
 constexpr int32_t SCREEN_SIDE = 240;
 
 // Quota thresholds at which the crab starts winding down. Deliberately below

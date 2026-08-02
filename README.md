@@ -1,129 +1,173 @@
-# esp32-claude
+# esp32-claude — a Claude Code usage monitor on a round ESP32 display
 
-Desk display for Claude Code token usage. A Windows Python script reads
-[ccusage](https://github.com/ryoppippi/ccusage) and pushes it to a round
-ESP32 display over BLE.
+A desk companion that shows how much of your **Claude Code** session and weekly
+limits you have left, on a 240×240 round GC9A01 display driven by an ESP32 over
+Bluetooth LE. A small Python script on your laptop reads your usage and pushes
+it to the device; a pixel crab reacts to how hard Claude is working and how much
+quota is left.
 
-Unofficial project. Not affiliated with or endorsed by Anthropic.
+![The six crab moods](assets/crab-moods.png)
 
-Full design spec: [docs/handover.md](docs/handover.md).
+Unofficial project. Not affiliated with, endorsed by, or supported by Anthropic.
+
+---
+
+## Why
+
+`/usage` tells you where you stand, but only when you stop and ask. This puts
+the same numbers on your desk, glanceable, so you notice you are at 85% of your
+5-hour window *before* you start a big refactor rather than halfway through it.
+
+The percentages are the **real** ones — the same figures Claude Code's own
+Account & Usage panel shows, not an estimate derived from token counts.
+
+## Features
+
+- **Real session and weekly quota percentages**, read from Claude Code's own
+  cache rather than guessed from token totals
+- **Correct reset times** in local time, taken from the actual quota boundary
+- **Three data views**, cycled with two buttons: session, weekly, today
+- **Arc gauge** around the rim, green → orange → red at 70% / 90%
+- **Live model and reasoning effort** (`opus-5 / xhigh`), which `ccusage` does
+  not expose — read from Claude Code's transcripts
+- **A crab that reacts** to model, effort and remaining quota
+- **Reconnects on its own** when the laptop sleeps or the device reboots
+- **Never blanks or shows zeros** when disconnected — it keeps the last reading
+  and tells you how old it is
+
+## The crab
+
+The mascot's expression is driven by what Claude is doing and how much session
+quota is left. Quota wins over everything else: a crab that looks alert while
+the session is spent would be actively misleading.
+
+| Mood | | When |
+|---|---|---|
+| **rocking** | <img src="assets/crab-rocking.gif" width="110"> | `xhigh` effort — echoing the guitar-strumming Clawd that Claude Code itself shows |
+| **focused** | <img src="assets/crab-focused.gif" width="110"> | `high` effort, or Opus generally |
+| **happy** | <img src="assets/crab-happy.gif" width="110"> | Haiku |
+| **chill** | <img src="assets/crab-chill.gif" width="110"> | everything else |
+| **sleepy** | <img src="assets/crab-sleepy.gif" width="110"> | session quota ≥ 85% — a warning while you still have room |
+| **asleep** | <img src="assets/crab-asleep.gif" width="110"> | session quota ≥ 100%, waiting out the reset |
+
+The artwork is original and generated from a script
+(`firmware/tools/make_crab_lottie.py`) — every shape is a rounded rect, which
+keeps ThorVG's software rasteriser affordable on a chip with no GPU. Anthropic's
+"Clawd" is their IP with no open licence, so nothing here is traced from it.
 
 ## Hardware
 
-Generic ESP32 dev board + round GC9A01 240x240 SPI display with resistive
-touch. Pin mapping lives in `firmware/lib/TFT_eSPI_Setup/User_Setup.h`
-(persists there regardless of which ESP32 board variant `firmware/platformio.ini`
-targets).
+| | |
+|---|---|
+| MCU | ESP32 (no PSRAM), 16 MB flash |
+| Display | GC9A01 240×240 round SPI TFT |
+| Buttons | 2 × momentary to GND — GPIO4 (up), GPIO19 (down) |
+| Link | Bluetooth LE (NimBLE), device advertises as `esp32-claude` |
+| Power | USB |
 
-## Status
+Display pins live in `firmware/lib/TFT_eSPI_Setup/User_Setup.h` and survive
+changing the `board =` target.
 
-Working end-to-end on real hardware: boots, advertises over BLE, host
-connects at the full requested MTU of 247, time syncs, and pushes live data
-whose percentages match Claude Code's own Account & Usage panel exactly
-(see `docs/BUILD_PROGRESS.md` for the full log).
+## Setup
 
-Three views, cycled with the two buttons (GPIO4 up / GPIO19 down):
+### Firmware
 
-```
-   SESSION            WEEKLY             TODAY
-     35%                11%              141.0M
-  57.8M tok $10.81   645.1M tok $49.81  today $26.19
-  resets 12:20 SGT   resets 05:00 +5d   opus-5 / xhigh
-      • ○ ○              ○ • ○              ○ ○ •
-```
-
-An arc around the rim tracks the percentage, coloured green / orange / red at
-70% / 90% like Claude.ai's own usage bar. A dot at the top shows connection
-state (green fresh / yellow stale / red disconnected); the dots at the bottom
-show which view you're on.
-
-The percentages are the **real** figures from Claude Code's own cache, not an
-estimate — see "Quota percentages" below.
-
-## Firmware (`firmware/`)
-
-PlatformIO project, `esp32dev` env, Arduino framework, NimBLE (not Bluedroid —
-saves ~100KB flash on a board with no PSRAM).
-
-```
+```bash
 cd firmware
-pio run                 # build
-pio run -t upload       # flash (board connected over USB, CH340/CP2102 bridge)
-pio device monitor      # serial @ 115200
+pio run -t upload        # build + flash over USB
+pio device monitor       # serial @ 115200
 ```
 
-Advertises as `esp32-claude` with one GATT service exposing two characteristics:
+### Host
 
-| Characteristic | Properties | Payload |
-|---|---|---|
-| Usage State | Read, Write | `UsageState` struct (68 bytes, version 4) |
-| Time Sync | Write | `uint32_t` epoch seconds |
-
-**Deviation from the original spec:** `docs/handover.md` lists Usage State as
-"Read, Notify". Notify only flows server→client, but the data source here is
-the host — the host must *write* the struct to the device. Implemented as
-Read+Write instead; Read stays for manual inspection with nRF Connect during
-bring-up.
-
-## Host (`host/`)
-
-```
+```bash
 cd host
 pip install -r requirements.txt
 python esp32-claude.py
 ```
 
-Reads `ccusage daily`, `ccusage weekly`, and `ccusage blocks` (all
-`--json --offline`) every 5 minutes, packs the result into the same
-`UsageState` struct the firmware expects, and pushes it over BLE. Reconnects
-automatically if the device or the laptop's Bluetooth radio drops (lid
-close/sleep is normal, not an error).
+Start it automatically at login:
 
-The current model and reasoning effort come from a second source: ccusage
-exposes model names but **drops the `effort` field during aggregation**, so
-`host/transcript_reader.py` reads both directly from Claude Code's own
-transcripts (`~/.claude/projects/**/*.jsonl`). Only the `effort` and
-`message.model` fields are read — never conversation content.
-
-Pinned against `ccusage 20.0.19` — schemas have already drifted once between
-versions during this project (see `host/ccusage_reader.py` docstring); re-verify
-with `jq 'keys'` on live output before bumping it.
-
-### Quota percentages
-
-The session and weekly percentages are the **real** figures — the same ones
-Claude Code's own Account & Usage panel shows. They're read from
-`~/.claude.json`'s `cachedUsageUtilization`, which Claude Code refreshes from
-the server.
-
-No calibration required. An earlier version of this project tried to estimate
-them against a hand-tuned token ceiling (per `docs/handover.md` section 4,
-which assumed the plan limit wasn't exposed) — that's obsolete. It also
-wouldn't have worked well: the percentages are weighted, since longer contexts
-cost more even when cached, so they aren't a linear function of token counts.
-
-Two caveats:
-
-- It's a **cache**, refreshed only while Claude Code is running. If Claude
-  Code has been closed for a while the percentages freeze; `limits_fetched`
-  is sent to the device so this can be surfaced.
-- ccusage's rolling 5-hour block boundary is **not** the quota reset (seen
-  12:00 vs the real 12:20 SGT). The display uses the real `resets_at`.
-
-`*_cents` fields are what those tokens would cost at API rates, not money
-actually spent on a subscription — label any UI accordingly.
-
-### Autostart (Windows)
-
-```
+```powershell
 powershell -ExecutionPolicy Bypass -File host\install_autostart.ps1
 ```
 
-Registers a per-user Scheduled Task (`esp32-claude-host`) that runs the host
-script at logon. Remove with
-`Unregister-ScheduledTask -TaskName esp32-claude-host -Confirm:$false`.
+(Windows. Uses a Startup-folder shortcut, since registering a Scheduled Task
+needs admin. Remove with `-Uninstall`.)
 
-## Build order
+## How it works
 
-See `docs/handover.md` section 8 for the full sequence and rationale.
-`docs/BUILD_PROGRESS.md` tracks current status against it.
+```
+ccusage ──┐
+          ├─→ host/esp32-claude.py ──BLE(GATT write)──→ ESP32 ──→ LVGL ──→ display
+~/.claude.json ──┘                                       ↑
+  (real quota %)                                    GPIO4 / GPIO19
+~/.claude/projects/*.jsonl                            (navigation)
+  (model + effort)
+```
+
+The device is the BLE **peripheral**; the laptop is the central and pushes a
+68-byte packed struct (`UsageState`) every time something visible changes, plus
+a heartbeat. Time is synced on every connect, so the display can age its own
+data and detect when a quota window has rolled over.
+
+Three data sources, because no single one has everything:
+
+| Source | Provides |
+|---|---|
+| `ccusage daily` / `weekly` / `blocks` | token and cost totals |
+| `~/.claude.json` (`cachedUsageUtilization`) | the real quota %, and reset times |
+| `~/.claude/projects/**/*.jsonl` | current model and reasoning effort |
+
+Only the `effort` and `message.model` fields are read from transcripts — never
+conversation content.
+
+## Notes for anyone building something similar
+
+Things that cost real debugging time here, in case they save you some:
+
+- **ThorVG needs a 32 KB task stack.** Its Lottie parser recurses deeply and
+  runs on whichever task calls `lv_timer_handler()` — Arduino's `loopTask`,
+  which defaults to 8 KB. It crash-loops with `LoadProhibited` *regardless of
+  free heap*, so shrinking the animation never helps. LVGL's own `#error` guard
+  for this is nested inside `#if LV_USE_OS`, so a no-OS build gets no warning.
+- **ThorVG refuses to reload a `Picture`** (`if (paint || surface) return
+  Result::InsufficientCondition;`) and `lv_lottie_set_src_data` ignores the
+  return code. Swapping animations therefore does nothing unless you destroy and
+  recreate the widget. Clear the shared buffer too, or the old frame ghosts
+  through the transparent gaps.
+- **`lv_lottie_set_src_data` assumes 60 fps** when deriving duration
+  (`frames * 1000 / 60`). Animations authored at another rate play at the wrong
+  speed until you override it from `tvg_animation_get_duration`.
+- **`lv_display_set_buffers` asserts on buffer alignment.** A plain
+  `static uint8_t buf[]` only guarantees 1-byte alignment; use `alignas`. With
+  `LV_USE_LOG` off, the assert is a silent `while(1)` — the board just stops
+  with no output at all.
+- **`esp32dev` assumes 4 MB flash.** If your board has 16 MB, set
+  `board_upload.flash_size` and a matching partition table or you are capped at
+  a 1.31 MB app partition.
+- **Quota percentages are weighted**, not proportional to tokens — long contexts
+  cost more even when cached. Do not try to derive them.
+
+## Credits
+
+**[ccusage](https://github.com/ryoppippi/ccusage)** by [@ryoppippi](https://github.com/ryoppippi)
+does the heavy lifting for token and cost accounting. It parses Claude Code's
+local JSONL transcripts and turns them into clean daily / weekly / block totals,
+which is the entire reason this project did not need to write its own log
+parser. If you want usage reporting in a terminal rather than on a desk gadget,
+use ccusage directly — it is excellent.
+
+Pinned against `ccusage 20.0.19`; its JSON schema has shifted between releases,
+so re-check before bumping.
+
+Also built on [LVGL](https://lvgl.io/), [TFT_eSPI](https://github.com/Bodmer/TFT_eSPI),
+[NimBLE-Arduino](https://github.com/h2zero/NimBLE-Arduino),
+[ThorVG](https://github.com/thorvg/thorvg) and [bleak](https://github.com/hbldh/bleak).
+
+## Licence and disclaimer
+
+Unofficial and unaffiliated with Anthropic. "Claude" and "Claude Code" are
+Anthropic's marks; the crab here is original artwork, not Anthropic's Clawd.
+`*_cents` values are what the tokens would cost at API rates — not money spent
+on a subscription.
