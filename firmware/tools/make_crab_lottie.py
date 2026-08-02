@@ -47,6 +47,10 @@ EYE_DARK = [0.106, 0.098, 0.094]
 #   wave     : claw swing in degrees (0 = arms down)
 #   bob      : body bob in px
 #   speed    : layer time stretch (>1 = slower)
+#   loop     : loop length in frames (default DUR). Only worth raising for a
+#              mood with an occasional one-off action, so it does not repeat
+#              every two seconds.
+#   sip      : desk scene only - lift the mug to the face once per loop
 #   blush    : cheek patches
 #   zzz      : floating sleep marks
 MOODS: dict[str, dict] = {
@@ -82,7 +86,7 @@ MOODS: dict[str, dict] = {
     # bob=0 deliberately: the typing claws and the steam already carry the
     # motion, and the body bob is what makes an asset expensive (see below).
     "working": dict(eye="squint", brow="furrow", pupil_dx=0, mouth="flat",  wave=0,  bob=0,
-                    speed=0.9, desk=True, body_dy=14),
+                    speed=0.9, desk=True, body_dy=14, loop=180, sip=True),
 }
 
 ZZZ_COLOR = [0.949, 0.949, 0.980]
@@ -200,7 +204,7 @@ def build(mood: str) -> dict:
     # Applied at construction rather than as a layer transform so the bob
     # animation, which is built from these same base positions, follows it.
     dy = m.get("body_dy", 0)
-    dur = DUR
+    dur = m.get("loop", DUR)
     q = [0, dur * 0.25, dur * 0.5, dur * 0.75, dur]
 
     def swing(sign):
@@ -347,7 +351,7 @@ def build(mood: str) -> dict:
         # Claws alternate so it reads as typing rather than one arm waving.
         # Eight strokes per loop, not four: at four the rise and fall are slow
         # enough to read as a wave, which is what "rocking" already looks like.
-        taps = 8
+        taps = max(8, round(8 * dur / DUR))
         tap_a = anim([(dur * i / taps, [0 if i % 2 == 0 else -4])
                       for i in range(taps + 1)])
         tap_b = anim([(dur * i / taps, [-4 if i % 2 == 0 else 0])
@@ -370,16 +374,72 @@ def build(mood: str) -> dict:
                 pts.append((dur, [0]))
             return anim(pts)
 
+        # The occasional coffee break. Phases as fractions of the loop: type,
+        # lift, drink, lower, type. The long typing stretch before the lift is
+        # the whole point - a sip every loop reads as a nervous tic, so the
+        # mood carries a longer `loop` and the sip occupies a slice of it.
+        #
+        # Deliberately only three moving groups (the mug parts) plus a
+        # re-pointed claw. Position keyframes are the expensive kind, so the
+        # steam and the right claw are left alone to carry on regardless.
+        sip = m.get("sip")
+        t_lift, t_up, t_down, t_rest = (dur * f for f in (0.70, 0.76, 0.88, 0.94))
+
+        def sip_track(rest, up):
+            """Hold at rest, lift, hold at the face, lower, hold at rest."""
+            (rx, ry), (ux, uy) = rest, up
+            return anim([(0, [rx, ry]), (t_lift, [rx, ry]), (t_up, [ux, uy]),
+                         (t_down, [ux, uy]), (t_rest, [rx, ry]), (dur, [rx, ry])])
+
+        # Every mug part shares ONE pivot and carries its own offset from it,
+        # so a single rotation tips the whole cup as a rigid body. Rotating
+        # each part about its own centre instead makes the handle spin off the
+        # mug - Lottie rotates a group about its own transform position, so a
+        # common pivot is the only way to keep an assembly together.
+        mug_rest, mug_up = (12, 56), (24, 38)
+        hold = t_down - t_up
+        # Clockwise is positive and the face is to the RIGHT of the raised mug,
+        # so a positive angle tips the rim towards the mouth. Negative would
+        # pour it down the crab's back.
+        tilt = anim([(0, [0]), (t_up, [0]), (t_up + hold * 0.3, [26]),
+                     (t_up + hold * 0.75, [26]), (t_down, [0]), (dur, [0])])
+
+        def mug_part(name, shape_args, color, off):
+            w, h, r = shape_args
+            g = group(name, [rect(w, h, r, offset=off), fill(color)], mug_rest)
+            if sip:
+                g["it"][-1]["p"] = sip_track(mug_rest, mug_up)
+                g["it"][-1]["r"] = tilt
+            return g
+
+        def sip_claw(base_x, base_y, track, up):
+            """Left claw: taps, then leaves the keyboard to hold the mug."""
+            if not sip:
+                return tap(base_x, base_y, track)
+            g = group("sipclaw", [rect(9, 8, 3), fill(SHELL_DARK)], (base_x, base_y))
+            pts = [(t, [base_x, base_y + v[0]])
+                   for (t, v) in zip([k["t"] for k in track["k"]],
+                                     [k["s"] for k in track["k"]])
+                   if t < t_lift]
+            pts += [(t_lift, [base_x, base_y]), (t_up, list(up)), (t_down, list(up)),
+                    (t_rest, [base_x, base_y]), (dur, [base_x, base_y])]
+            g["it"][-1]["p"] = anim(pts)
+            return g
+
         # Front to back. Claws must come BEFORE the lid and base or they
         # render on top of the screen instead of resting on the keyboard.
         # The laptop is centred on cx and its lid is narrower than the 44px
         # shell, so a few px of crab shows either side. Off-centre or full
         # width, the head reads as balanced ON the laptop rather than behind it.
+        #
+        # The raised position stops just BELOW the eyes. Higher and the mug
+        # covers them, and the eyes are what carry the expression - the same
+        # reason the guitar neck is kept shallow.
         desk_front = [
-            group("coffee", [rect(9, 3, 1), fill(COFFEE)], (12, 53)),
-            group("mug", [rect(12, 11, 3), fill(MUG)], (12, 56)),
-            group("handle", [rect(4, 6, 2), fill(MUG)], (20, 56)),
-            tap(cx - 12, 59, tap_a),
+            mug_part("coffee", (9, 3, 1), COFFEE, (0, -3)),
+            mug_part("mug", (12, 11, 3), MUG, (0, 0)),
+            mug_part("handle", (4, 6, 2), MUG, (8, 0)),
+            sip_claw(cx - 12, 59, tap_a, (26, 47)),
             tap(cx + 12, 59, tap_b),
             group("lapbase", [rect(40, 5, 2), fill(LAPTOP)], (cx, 60)),
             group("lapglow", [rect(28, 2, 1), fill(SCREEN_GLOW)], (cx, 43)),
