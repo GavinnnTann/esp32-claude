@@ -6,7 +6,7 @@ Bluetooth LE. A small Python script on your laptop reads your usage and pushes
 it to the device; a pixel crab reacts to how hard Claude is working and how much
 quota is left.
 
-![All seven crab moods animating](assets/crab-moods.gif)
+![All fourteen crab moods animating](assets/crab-moods.gif)
 
 Unofficial project. Not affiliated with, endorsed by, or supported by Anthropic.
 
@@ -30,7 +30,8 @@ Account & Usage panel shows, not an estimate derived from token counts.
 - **Arc gauge** around the rim, green → orange → red at 70% / 90%
 - **Live model and reasoning effort** (`opus-5 / xhigh`), which `ccusage` does
   not expose — read from Claude Code's transcripts
-- **A crab that reacts** to model, effort and remaining quota
+- **A crab that reacts** to model, effort, remaining quota and whether
+  Claude is actually doing anything
 - **Reconnects on its own** when the laptop sleeps or the device reboots
 - **Never blanks or shows zeros** when disconnected — it keeps the last reading
   and tells you how old it is
@@ -41,19 +42,44 @@ The mascot's expression is driven by what Claude is doing and how much session
 quota is left. Quota wins over everything else: a crab that looks alert while
 the session is spent would be actively misleading.
 
-| Mood | | When | Tell |
-|---|---|---|---|
-| **rocking** | <img src="assets/crab-rocking.gif" width="100"> | `xhigh` effort | strums a guitar on a purple stage, echoing the Clawd that Claude Code itself shows at that level |
-| **working** | <img src="assets/crab-working.gif" width="100"> | `high` effort | hunched behind a laptop, typing, and every so often it stops to tilt the mug back for a drink |
-| **focused** | <img src="assets/crab-focused.gif" width="100"> | Opus | hard angled brows, narrow eyes, almost no movement |
-| **happy** | <img src="assets/crab-happy.gif" width="100"> | Haiku | eyes shut in `^^` arcs, wide grin, blushing, bouncy |
-| **chill** | <img src="assets/crab-chill.gif" width="100"> | everything else | raised brows, wide eyes glancing aside, easy sway |
-| **sleepy** | <img src="assets/crab-sleepy.gif" width="100"> | session ≥ 85% | heavy lids, drooping brows, a drifting `z` |
-| **asleep** | <img src="assets/crab-asleep.gif" width="100"> | session ≥ 100% | tucked into bed under a blanket, snoozing `z`s |
+Every model has its own pair, split at `high` effort:
 
-Every mood has exactly one trigger. Effort drives the desk scene and model drives
-the face: reasoning effort is what actually means grinding, and it changes with
-the work rather than with whichever model happens to be selected.
+| Model | below `high` | | `high` and above | |
+|---|---|---|---|---|
+| **Fable** | `fable_calm` — in a full plumed helm, standing watch on a black field | <img src="assets/crab-fable_calm.gif" width="90"> | `fable_fight` — swinging a burning sword at a dragon, firelight pulsing in time with every strike | <img src="assets/crab-fable_fight.gif" width="90"> |
+| **Opus** | `rocking_calm` — same guitar, stage lit but not pulsing | <img src="assets/crab-rocking_calm.gif" width="90"> | `rocking` — strums on a purple stage, the grid flashing to the beat | <img src="assets/crab-rocking.gif" width="90"> |
+| **Sonnet** | `focused` — hard angled brows, narrow eyes, almost no movement | <img src="assets/crab-focused.gif" width="90"> | `working` — hunched behind a laptop, typing, and now and then tilting the mug back for a drink | <img src="assets/crab-working.gif" width="90"> |
+| **Haiku** | `chill` — raised brows, wide eyes glancing aside, easy sway | <img src="assets/crab-chill.gif" width="90"> | `happy` — eyes shut in `^^` arcs, wide grin, blushing, bouncy | <img src="assets/crab-happy.gif" width="90"> |
+
+Three states override the model:
+
+| | | When | Tell |
+|---|---|---|---|
+| **idle** | <img src="assets/crab-idle.gif" width="90"> | nothing written for 5 min | three dots lighting in turn overhead — Claude is waiting on you |
+| **tired** | <img src="assets/crab-working_tired.gif" width="90"> | session ≥ 85% | **stays in whatever set it was already in** and nods off there — see below |
+| **asleep** | <img src="assets/crab-asleep.gif" width="90"> | session ≥ 100% | tucked into bed under a blanket, snoozing `z`s |
+
+Resolved in this order: **quota → idle → model → effort**. Idle outranks model
+and effort because those describe the last thing that *ran*, not what is
+happening now.
+
+### Nodding off in place
+
+Passing 85% does **not** cut to a generic sleepy animation. Each set has its
+own tired version, so the crab keeps its props and simply falls asleep where it
+is — swapping a crab at a desk for a bare crab on black read as a different
+character appearing.
+
+| | | |
+|---|---|---|
+| <img src="assets/crab-working_tired.gif" width="90"> | <img src="assets/crab-rocking_tired.gif" width="90"> | <img src="assets/crab-fable_tired.gif" width="90"> |
+| coffee gone cold, claws resting on the keys | guitar unstrummed, stage lights still on | shut behind the visor |
+
+Each is *cheaper* than the mood it replaces, not dearer — the busy motion is
+what costs. Moods with no set of their own (`focused`, `chill`, `happy`) fall
+back to the shared `sleepy`. 100% keeps the shared bed scene deliberately: the
+session is spent and the crab has stopped working, so leaving it slumped at its
+desk would say the opposite of what has happened.
 
 Each mood is separated by a *categorical* feature — brow angle, eye shape, a
 prop — rather than by size. An earlier version varied only eye height (10 / 7 /
@@ -63,8 +89,8 @@ legible through a round bezel; eyebrows and props are.
 
 The artwork is original and generated by a script
 (`firmware/tools/make_crab_lottie.py`), so a tweak is a one-line edit to its
-`MOODS` table. Every shape is a rounded rect, which keeps ThorVG's software
-rasteriser affordable on a chip with no GPU. Anthropic's "Clawd" is their IP
+`MOODS` table. Every shape is a rounded rect and nothing is ever stroked, which
+keeps ThorVG's software rasteriser affordable on a chip with no GPU. Anthropic's "Clawd" is their IP
 with no open licence, so nothing here is traced from it.
 
 ## Hardware
@@ -115,11 +141,11 @@ ccusage ──┐
 ~/.claude.json ──┘                                       ↑
   (real quota %)                                    GPIO4 / GPIO19
 ~/.claude/projects/*.jsonl                            (navigation)
-  (model + effort)
+  (model + effort, and mtime = idle clock)
 ```
 
 The device is the BLE **peripheral**; the laptop is the central and pushes a
-68-byte packed struct (`UsageState`) every time something visible changes, plus
+72-byte packed struct (`UsageState`) every time something visible changes, plus
 a heartbeat. Time is synced on every connect, so the display can age its own
 data and detect when a quota window has rolled over.
 
@@ -129,10 +155,11 @@ Three data sources, because no single one has everything:
 |---|---|
 | `ccusage daily` / `weekly` / `blocks` | token and cost totals |
 | `~/.claude.json` (`cachedUsageUtilization`) | the real quota %, and reset times |
-| `~/.claude/projects/**/*.jsonl` | current model and reasoning effort |
+| `~/.claude/projects/**/*.jsonl` | current model and reasoning effort; its **mtime** is the idle clock |
 
 Only the `effort` and `message.model` fields are read from transcripts — never
-conversation content.
+conversation content. Idle detection needs no reading at all: the file's
+modification time already is the moment of the last activity.
 
 ## Notes for anyone building something similar
 
@@ -158,6 +185,28 @@ Things that cost real debugging time here, in case they save you some:
 - **`esp32dev` assumes 4 MB flash.** If your board has 16 MB, set
   `board_upload.flash_size` and a matching partition table or you are capped at
   a 1.31 MB app partition.
+- **LVGL's built-in allocator hides its own exhaustion.** With
+  `LV_USE_STDLIB_MALLOC = LV_STDLIB_BUILTIN`, every `lv_malloc` is served from a
+  *fixed* `LV_MEM_SIZE` pool — widgets, the layer buffer, ThorVG's Lottie parse
+  and the arc's anti-aliasing masks all compete inside it. `ESP.getFreeHeap()`
+  cannot see that pool, so the device happily reported ~22 KB free while LVGL was
+  genuinely out of memory and the arc died with `circ_calc_aa4: Asserted at
+  expression: cir_x != NULL`. Switching to `LV_STDLIB_CLIB` removes the ceiling
+  *and* hands the static pool back to the heap.
+- **Don't use Lottie strokes on this hardware.** ThorVG builds RLE spans for
+  stroke geometry; ten stroked shapes gave `_horizLine: Asserted at expression:
+  rle->spans != NULL (Out of memory)` (`tvgSwRle.cpp:363`) before one animation
+  cycle finished. Faking an outline with a larger rect behind each shape works,
+  but costs a whole extra group per shape.
+- **Overlapping fills, not asset size, are what cost.** ThorVG composites them.
+  Drawing an eyelid over a full-height eye added four shapes and ~17 KB of heap
+  — while producing a *smaller* `.json` than the version that worked. Two
+  animations of near-identical size can differ by 9 KB at runtime purely by how
+  much they overlap.
+- **Measure heap after a render, not after a parse.** The obvious place to log
+  it is right after loading an animation, but ThorVG allocates again while
+  rasterising, in proportion to painted area. That gap is why a 1.9 KB
+  allocation appeared to fail with 10 KB "free".
 - **Quota percentages are weighted**, not proportional to tokens — long contexts
   cost more even when cached. Do not try to derive them.
 

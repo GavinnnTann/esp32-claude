@@ -21,7 +21,7 @@ import subprocess
 import time
 from datetime import datetime, timezone
 
-from transcript_reader import read_current_model_effort
+from transcript_reader import read_current_model_effort, read_last_activity
 from usage_limits import read_usage_limits
 from usage_state import VERSION, UsageState
 
@@ -150,6 +150,7 @@ def read_usage_state() -> UsageState:
         session_reset=limits.session_reset,
         week_reset=limits.week_reset,
         limits_fetched=limits.fetched_at,
+        last_activity=read_last_activity(),
         session_pct=limits.session_pct,
         week_pct=limits.week_pct,
         limits_ok=1 if limits.ok else 0,

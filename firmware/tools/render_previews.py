@@ -24,14 +24,23 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-MOODS = ["happy", "focused", "chill", "working", "sleepy", "asleep", "rocking"]
+MOODS = ["fable_calm", "fable_fight", "rocking_calm", "rocking",
+         "focused", "working", "chill", "happy",
+         "idle", "fable_tired", "rocking_tired", "working_tired",
+         "sleepy", "asleep"]
 SCALE = 3
 # The combined grid is rendered at full SCALE then downsampled, so it stays
 # crisp while keeping the GIF small enough to sit at the top of a README.
 GRID_SCALE = 2
 GRID_FRAMES = 40
 GRID_FPS = 20
+STAGE_MOODS = {"rocking", "rocking_calm", "rocking_tired", "fable_fight"}
+STAGE_KIND = {"fable_fight": "fire", "rocking_tired": "rockstill",
+              "rocking_calm": "rockstill"}
 STAGE_BG = (46, 24, 81, 255)
+# Fable fights on a dark field lit by fire; rocking plays on a purple stage.
+FIRE_BG = (18, 5, 4, 255)
+FIRE_GLOW = (140, 38, 26)
 STAGE_GRID = (152, 80, 229)
 
 
@@ -56,19 +65,32 @@ def render(doc, frame, stage=False):
     if stage:
         # Mirrors the native LVGL stage drawn in ui.cpp, so the README shows
         # what the device shows rather than a bare animation on black.
-        img.paste(Image.new("RGBA", img.size, STAGE_BG), (0, 0))
-        dr = ImageDraw.Draw(img, "RGBA")
-        pulse = 0.9 if (frame % 15) < 7 else 0.25
-        a = int(255 * pulse)
-        for i in range(4):
-            p = int(w * SCALE * (i + 1) / 5)
-            dr.rectangle([p, 0, p + 2 * SCALE, h * SCALE], fill=STAGE_GRID + (a,))
-            dr.rectangle([0, p, w * SCALE, p + 2 * SCALE], fill=STAGE_GRID + (a,))
+        if stage == "fire":
+            # One pulse per sword strike - four across the loop, matching
+            # FABLE_STRIKES in make_crab_lottie.py and kFirePulseMs in ui.cpp.
+            # Interpolate the background colour rather than overlaying a
+            # translucent wash, which blew the whole frame out to near-white.
+            phase = (frame % 15) / 15.0
+            u = 1.0 - abs(phase * 2 - 1)
+            bg = tuple(int(a + (b - a) * u) for a, b in zip(FIRE_BG[:3], FIRE_GLOW)) + (255,)
+            img.paste(Image.new("RGBA", img.size, bg), (0, 0))
+        else:
+            img.paste(Image.new("RGBA", img.size, STAGE_BG), (0, 0))
+            dr = ImageDraw.Draw(img, "RGBA")
+            # RockStill in ui.cpp: lights on, performer asleep. No pulse, and
+            # the grid sits at a fixed low opacity.
+            pulse = 0.3 if stage == "rockstill" else (0.9 if (frame % 15) < 7 else 0.25)
+            a = int(255 * pulse)
+            for i in range(4):
+                p = int(w * SCALE * (i + 1) / 5)
+                dr.rectangle([p, 0, p + 2 * SCALE, h * SCALE], fill=STAGE_GRID + (a,))
+                dr.rectangle([0, p, w * SCALE, p + 2 * SCALE], fill=STAGE_GRID + (a,))
 
     for g in reversed(doc["layers"][0]["shapes"]):
         rc = next(i for i in g["it"] if i["ty"] == "rc")
         fl = next(i for i in g["it"] if i["ty"] == "fl")
         tr = next(i for i in g["it"] if i["ty"] == "tr")
+        st = next((i for i in g["it"] if i["ty"] == "st"), None)
         p, anchor = val(tr["p"], frame), val(tr["a"], frame)
         r = val(tr["r"], frame)
         rot = math.radians(r[0] if isinstance(r, list) else r)
@@ -83,9 +105,21 @@ def render(doc, frame, stage=False):
         cx = p[0] + ox * math.cos(rot) - oy * math.sin(rot)
         cy = p[1] + ox * math.sin(rot) + oy * math.cos(rot)
         col = tuple(int(c * 255) for c in fl["c"]["k"][:3]) + (int(255 * op / 100),)
-        lay = Image.new("RGBA", (int(sz[0] * SCALE) + 2, int(sz[1] * SCALE) + 2), (0, 0, 0, 0))
+        # Stroke is drawn ON TOP of the fill, matching the order the generator
+        # emits and the heavy chibi outline it is going for. Approximate: PIL
+        # centres its outline on the edge, ThorVG does the same, but this is
+        # the one part of the preview that is not guaranteed pixel-faithful.
+        pad = int((val(st["w"], frame) if st else 0) * SCALE) + 2
+        lay = Image.new("RGBA", (int(sz[0] * SCALE) + pad, int(sz[1] * SCALE) + pad), (0, 0, 0, 0))
+        box = [pad // 2, pad // 2, sz[0] * SCALE + pad // 2, sz[1] * SCALE + pad // 2]
+        sw = None
+        if st is not None:
+            w = val(st["w"], frame)
+            w = w[0] if isinstance(w, list) else w
+            sw = (tuple(int(c * 255) for c in st["c"]["k"][:3]) + (255,), max(1, int(w * SCALE)))
         ImageDraw.Draw(lay).rounded_rectangle(
-            [1, 1, sz[0] * SCALE, sz[1] * SCALE], radius=max(1, rad * SCALE), fill=col)
+            box, radius=max(1, rad * SCALE), fill=col,
+            outline=sw[0] if sw else None, width=sw[1] if sw else 0)
         if abs(rot) > 1e-6:
             lay = lay.rotate(-math.degrees(rot), expand=True, resample=Image.BICUBIC)
         img.alpha_composite(lay, (int(cx * SCALE - lay.width / 2), int(cy * SCALE - lay.height / 2)))
@@ -103,7 +137,7 @@ def main(argv):
 
     # Per-mood animated GIFs.
     for m, doc in docs.items():
-        stage = m == "rocking"
+        stage = STAGE_KIND.get(m, m in STAGE_MOODS)
         step = 2
         frames = [render(doc, f, stage).convert("P", palette=Image.ADAPTIVE)
                   for f in range(0, doc["op"], step)]
@@ -118,7 +152,7 @@ def main(argv):
     w = docs["happy"]["w"] * SCALE
     sheet = Image.new("RGBA", (w * len(MOODS), w), (10, 10, 10, 255))
     for i, m in enumerate(MOODS):
-        sheet.paste(render(docs[m], 4, m == "rocking"), (i * w, 0))
+        sheet.paste(render(docs[m], 4, STAGE_KIND.get(m, m in STAGE_MOODS)), (i * w, 0))
     sheet.save(out / "crab-moods.png")
     print("  crab-moods.png")
 
@@ -140,7 +174,7 @@ def main(argv):
         dr = ImageDraw.Draw(img)
         for j, m in enumerate(MOODS):
             doc = docs[m]
-            frame = render(doc, u * doc["op"], m == "rocking")
+            frame = render(doc, u * doc["op"], STAGE_KIND.get(m, m in STAGE_MOODS))
             x, y = (j % cols) * cell, (j // cols) * (cell + pad)
             img.paste(frame.resize((cell, cell), Image.NEAREST), (x, y))
             dr.text((x + 4, y + cell + 3), m, fill=(200, 200, 200, 255))

@@ -5,7 +5,7 @@
 // Data contract shared with host/usage_state.py - keep both in sync.
 // See docs/handover.md section 4.
 //
-// Size note: 68 bytes. Needs an ATT write payload of MTU-3, so the device
+// Size note: 72 bytes. Needs an ATT write payload of MTU-3, so the device
 // requests MTU 247 (see ble_server.cpp). The negotiated MTU is printed at
 // connect time - if it ever comes back below 71, writes silently fall back
 // to the stack's queued/long-write path.
@@ -21,12 +21,13 @@ struct __attribute__((packed)) UsageState {
   uint32_t session_reset;    // epoch UTC - REAL quota reset, not ccusage's block boundary
   uint32_t week_reset;       // epoch UTC
   uint32_t limits_fetched;   // epoch UTC - when Claude Code last refreshed the % cache
+  uint32_t last_activity;    // epoch UTC - newest transcript's mtime, 0 = unknown
   uint8_t session_pct;       // 0-100, real "Session (5hr)" figure
   uint8_t week_pct;          // 0-100, real "Weekly (7 day)" figure
   uint8_t limits_ok;         // 0 = cache unavailable, percentages are meaningless
   char model[16];            // e.g. "sonnet-5" - NOT null-terminated if exactly 16 chars
   char effort[8];            // e.g. "xhigh"   - same caveat
-};                           // 68 bytes, little-endian
+};                           // 72 bytes, little-endian
 
 // v1: original 26-byte struct. v2: +week_tokens/week_cents.
 // v3: +model/effort (read from Claude Code transcripts - ccusage drops effort).
@@ -36,9 +37,13 @@ struct __attribute__((packed)) UsageState {
 //     exposed the plan limit, but Claude Code caches the server's own figures.
 //     `block_reset` (ccusage's 5h block boundary) became `session_reset` (the
 //     real reset) - they genuinely differ, e.g. 12:00 vs 12:20 SGT.
+// v5: +last_activity. The host sends the INSTANT of the last transcript write,
+//     not an age, so a packet that arrives late still ages correctly here
+//     instead of freezing at whatever it was when the host built it. It is the
+//     transcript file's mtime, so nothing inside the file is read for it.
 // Bump this on every layout change so a stale build on either side is cleanly
 // rejected by ble_server.cpp's version check, not misparsed.
-static const uint8_t USAGE_STATE_VERSION = 4;
+static const uint8_t USAGE_STATE_VERSION = 5;
 
 // Custom 128-bit UUIDs, generated once for this project - keep in sync with host/usage_state.py.
 #define SERVICE_UUID     "059b7bd7-0687-434c-bcfb-38f72a72f9a7"
