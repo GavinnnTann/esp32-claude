@@ -51,8 +51,16 @@ MOODS: dict[str, dict] = {
                     guitar=True),
 }
 
-GUITAR_BODY = [0.451, 0.271, 0.153]
-GUITAR_NECK = [0.290, 0.180, 0.106]
+# Teal body, cream neck. Wood-brown was the obvious choice and the wrong one:
+# against an orange crab it read as another shade of crab. Teal is orange's
+# complement so it separates from the body, and cream keeps the neck legible
+# where it crosses the dark purple backdrop.
+GUITAR_BODY = [0.106, 0.737, 0.706]
+GUITAR_NECK = [0.949, 0.898, 0.780]
+
+# Stage backdrop for the rocking mood, echoing Clawd's purple grid.
+STAGE_BG = [0.180, 0.094, 0.318]
+STAGE_GRID = [0.596, 0.310, 0.898]
 # Lottie rotation is clockwise (screen y grows downward), so a positive tilt
 # swings the neck up and to the right. 75 is deliberately shallow: at a
 # steeper, more natural-looking angle the neck runs straight through the right
@@ -84,8 +92,9 @@ def rect(w, h, roundness, offset=(0.0, 0.0)):
             "r": static(roundness), "nm": "rc"}
 
 
-def fill(color):
-    return {"ty": "fl", "c": rgb(color), "o": static(100), "r": 1, "nm": "fl"}
+def fill(color, opacity=None):
+    return {"ty": "fl", "c": rgb(color),
+            "o": opacity if opacity is not None else static(100), "r": 1, "nm": "fl"}
 
 
 def group(name, shapes, pos, rot=None, offset=(0.0, 0.0)):
@@ -173,11 +182,28 @@ def build(mood: str) -> dict:
                   (cx + 18, claw_y), None if m["wave"] == 0 else swing(-1)),
         ]
 
+    # Stage backdrop: purple panel with a grid that pulses on each strum, so
+    # the beat is visible even though the claw's travel is only a few pixels.
+    # Kept to 6 lines — every extra shape is ThorVG rasterising work, and this
+    # mood is already the most expensive one.
+    stage = []
+    if m.get("guitar"):
+        beat = anim([(q[0], [90]), (dur * 0.125, [28]), (q[1], [90]),
+                     (dur * 0.375, [28]), (q[2], [90]), (dur * 0.625, [28]),
+                     (q[3], [90]), (dur * 0.875, [28]), (q[4], [90])])
+        grid = []
+        for i, gxp in enumerate((16, 40, 64)):
+            grid.append(group(f"gv{i}", [rect(2, 78, 0), fill(STAGE_GRID, beat)], (gxp, 40)))
+        for i, gyp in enumerate((16, 40, 64)):
+            grid.append(group(f"gh{i}", [rect(78, 2, 0), fill(STAGE_GRID, beat)], (40, gyp)))
+        stage = [*grid, group("stage_bg", [rect(78, 78, 10), fill(STAGE_BG)], (40, 40))]
+
     # Lottie draws index 0 LAST, i.e. on top — the opposite of a painter's
     # algorithm. This list therefore runs front to back. A held guitar belongs
-    # in front of the shell; bare claws tuck behind it.
+    # in front of the shell; bare claws tuck behind it. The stage sits behind
+    # everything, so it goes last.
     if m.get("guitar"):
-        shapes = [mouth, *face, *limbs, shell, *legs]
+        shapes = [mouth, *face, *limbs, shell, *legs, *stage]
     else:
         shapes = [mouth, *face, shell, *limbs, *legs]
 

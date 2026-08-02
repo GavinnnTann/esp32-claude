@@ -33,6 +33,22 @@ constexpr uint8_t kAsleepPct = 100;
 
 CrabMood currentMood = CRAB_MOOD_COUNT;  // sentinel: nothing loaded yet
 
+uint32_t nowUtc = 0;
+
+// The percentages come from a cache Claude Code refreshes on its own schedule,
+// so they can outlive the window they describe: if the cache was last fetched
+// before `reset` and that moment has now passed, the quota window has rolled
+// over and the cached figure is stale by definition — observed showing 75% for
+// a session that had already reset 24 minutes earlier.
+//
+// Reporting "unknown" is the honest answer here. Silently showing 0% would be
+// a guess (the new window may already have usage in it), and showing the old
+// value would be plainly wrong.
+bool quota_window_current(uint32_t reset_utc) {
+  if (nowUtc == 0 || reset_utc == 0) return true;  // can't tell; don't cry wolf
+  return nowUtc < reset_utc;
+}
+
 bool contains(const char *hay, size_t hay_len, const char *needle) {
   size_t n = strlen(needle);
   if (n == 0 || n > hay_len) return false;
@@ -46,7 +62,9 @@ bool contains(const char *hay, size_t hay_len, const char *needle) {
 // session is exhausted would be actively misleading. Below that, the mood
 // reflects which model and effort level is doing the work.
 CrabMood mood_for(const UsageState &s) {
-  if (s.limits_ok) {
+  // Only trust the quota for mood while its window is still live. Otherwise a
+  // stale 100% would leave the crab asleep long after the session had reset.
+  if (s.limits_ok && quota_window_current(s.session_reset)) {
     if (s.session_pct >= kAsleepPct) return CRAB_ASLEEP;
     if (s.session_pct >= kSleepyPct) return CRAB_SLEEPY;
   }
@@ -251,19 +269,31 @@ void render_view() {
   char resetBuf[36];
 
   switch (currentView) {
-    case View::Session:
-      set_quota_view(s.session_pct, s.limits_ok);
+    case View::Session: {
+      bool live = quota_window_current(s.session_reset);
+      set_quota_view(s.session_pct, s.limits_ok && live);
       set_tokens_row(s.block_tokens, s.block_cents);
-      format_reset_sgt(s.session_reset, resetBuf, sizeof(resetBuf));
+      if (live) {
+        format_reset_sgt(s.session_reset, resetBuf, sizeof(resetBuf));
+      } else {
+        snprintf(resetBuf, sizeof(resetBuf), "window reset - awaiting data");
+      }
       lv_label_set_text(resetLabel, resetBuf);
       break;
+    }
 
-    case View::Weekly:
-      set_quota_view(s.week_pct, s.limits_ok);
+    case View::Weekly: {
+      bool live = quota_window_current(s.week_reset);
+      set_quota_view(s.week_pct, s.limits_ok && live);
       set_tokens_row(s.week_tokens, s.week_cents);
-      format_reset_far(s.week_reset, s.ts, resetBuf, sizeof(resetBuf));
+      if (live) {
+        format_reset_far(s.week_reset, nowUtc ? nowUtc : s.ts, resetBuf, sizeof(resetBuf));
+      } else {
+        snprintf(resetBuf, sizeof(resetBuf), "window reset - awaiting data");
+      }
       lv_label_set_text(resetLabel, resetBuf);
       break;
+    }
 
     case View::Details:
     default: {
@@ -408,6 +438,16 @@ void ui_prev_view() {
 }
 
 View ui_current_view() { return currentView; }
+
+void ui_set_now(uint32_t now_utc) {
+  // Re-render on the tick that crosses a reset boundary, so an expired window
+  // stops claiming a stale percentage without waiting for the next BLE push.
+  bool wasLive = quota_window_current(cachedState.session_reset);
+  nowUtc = now_utc;
+  if (haveCached && wasLive && !quota_window_current(cachedState.session_reset)) {
+    render_view();
+  }
+}
 
 void ui_set_connection(ConnState state, uint32_t age_seconds, bool haveData) {
   lv_color_t dotColor;

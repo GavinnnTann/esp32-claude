@@ -125,6 +125,7 @@ void loop() {
 
   bool connected = ble_server_is_connected();
   uint32_t now = ble_server_synced_epoch();
+  ui_set_now(now);
   uint32_t age = (haveState && now >= lastStateEpoch) ? (now - lastStateEpoch) : 0;
 
   ConnState connState;
@@ -152,16 +153,25 @@ void loop() {
     ui_set_connection(connState, age, haveState);
   }
 
-  // Periodic heap report — catches slow leaks and shows the real headroom
-  // available once BLE is connected and LVGL has been rendering for a while.
-  static uint32_t lastHeapReport = 0;
-  if (millis() - lastHeapReport > 60000) {
-    lastHeapReport = millis();
-    Serial.printf("[mem] free heap: %u B, largest free block: %u B, min free ever: %u B\n",
+  // Time spent in lv_timer_handler is the honest cost of whatever is on
+  // screen: the mascot's software vector rendering can push this near 100%,
+  // where button response starts to suffer. Reported alongside heap so a
+  // regression in either is visible without reflashing an instrumented build.
+  uint32_t t0 = micros();
+  lv_timer_handler();
+  static uint32_t busyMicros = 0;
+  busyMicros += micros() - t0;
+
+  static uint32_t lastReport = 0;
+  if (millis() - lastReport > 60000) {
+    uint32_t elapsedMs = millis() - lastReport;
+    lastReport = millis();
+    Serial.printf("[mem] heap %u B (largest %u B, min ever %u B)  lvgl busy %lu%%  view %d\n",
                   (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap(),
-                  (unsigned)ESP.getMinFreeHeap());
+                  (unsigned)ESP.getMinFreeHeap(),
+                  (unsigned long)(busyMicros / (elapsedMs * 10)), (int)ui_current_view());
+    busyMicros = 0;
   }
 
-  lv_timer_handler();
   delay(5);
 }

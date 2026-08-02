@@ -18,6 +18,10 @@ enum class View : uint8_t {
 
 void ui_init();
 
+// Current wall-clock time (epoch UTC, 0 if the host hasn't synced yet). Needed
+// to tell whether a cached quota percentage still describes the live window.
+void ui_set_now(uint32_t now_utc);
+
 // Push a whole UsageState to the display.
 void ui_set_usage(const UsageState &state);
 
