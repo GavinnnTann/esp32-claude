@@ -6,7 +6,7 @@ Bluetooth LE. A small Python script on your laptop reads your usage and pushes
 it to the device; a pixel crab reacts to how hard Claude is working and how much
 quota is left.
 
-![The six crab moods](assets/crab-moods.png)
+![The seven crab moods](assets/crab-moods.png)
 
 Unofficial project. Not affiliated with, endorsed by, or supported by Anthropic.
 
@@ -44,11 +44,15 @@ the session is spent would be actively misleading.
 | Mood | | When | Tell |
 |---|---|---|---|
 | **rocking** | <img src="assets/crab-rocking.gif" width="100"> | `xhigh` effort | strums a guitar on a purple stage, echoing the Clawd that Claude Code itself shows at that level |
-| **focused** | <img src="assets/crab-focused.gif" width="100"> | `high` effort, or Opus | hard angled brows, narrow eyes, almost no movement |
+| **focused** | <img src="assets/crab-focused.gif" width="100"> | `high` effort | hard angled brows, narrow eyes, almost no movement |
+| **working** | <img src="assets/crab-working.gif" width="100"> | Opus | heads-down at a desk, typing on a laptop, mug of coffee steaming beside it |
 | **happy** | <img src="assets/crab-happy.gif" width="100"> | Haiku | eyes shut in `^^` arcs, wide grin, blushing, bouncy |
 | **chill** | <img src="assets/crab-chill.gif" width="100"> | everything else | raised brows, wide eyes glancing aside, easy sway |
 | **sleepy** | <img src="assets/crab-sleepy.gif" width="100"> | session ≥ 85% | heavy lids, drooping brows, a drifting `z` |
 | **asleep** | <img src="assets/crab-asleep.gif" width="100"> | session ≥ 100% | tucked into bed under a blanket, snoozing `z`s |
+
+Every mood has exactly one trigger. `focused` used to cover both `high` effort
+*and* Opus, so one face meant two unrelated things; the desk scene now takes Opus.
 
 Each mood is separated by a *categorical* feature — brow angle, eye shape, a
 prop — rather than by size. An earlier version varied only eye height (10 / 7 /
