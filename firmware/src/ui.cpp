@@ -46,6 +46,15 @@ void format_reset_sgt(uint32_t block_reset_utc, char *out, size_t out_len) {
   snprintf(out, out_len, "resets %02lu:%02lu SGT", (unsigned long)hh, (unsigned long)mm);
 }
 
+// Traffic-light thresholds, same idea as Claude.ai's own usage bar: green
+// while there's plenty of room in the block, amber as it gets close, red
+// once it's nearly (or fully) used up.
+lv_color_t arc_color_for_pct(uint8_t pct) {
+  if (pct < 70) return lv_palette_main(LV_PALETTE_GREEN);
+  if (pct < 90) return lv_palette_main(LV_PALETTE_ORANGE);
+  return lv_palette_main(LV_PALETTE_RED);
+}
+
 }  // namespace
 
 void ui_init() {
@@ -57,7 +66,9 @@ void ui_init() {
   lv_obj_t *scr = lv_screen_active();
   lv_obj_set_style_bg_color(scr, lv_color_black(), LV_PART_MAIN);
 
-  // Arc gauge around the rim, tracking block_pct (handover.md #7).
+  // Arc gauge around the rim, tracking block_pct like a quota/battery meter
+  // (handover.md #7, plus the traffic-light coloring the user asked to match
+  // Claude.ai's own usage bar).
   arc = lv_arc_create(scr);
   lv_obj_set_size(arc, 220, 220);
   lv_obj_center(arc);
@@ -69,7 +80,11 @@ void ui_init() {
   lv_obj_remove_flag(arc, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_set_style_arc_width(arc, 14, LV_PART_MAIN);
   lv_obj_set_style_arc_width(arc, 14, LV_PART_INDICATOR);
-  lv_obj_set_style_arc_color(arc, lv_palette_main(LV_PALETTE_BLUE), LV_PART_INDICATOR);
+  // Dim, neutral track behind a bright rounded-cap indicator — flat caps on a
+  // thin indicator read as a stray blocky tick mark at low percentages.
+  lv_obj_set_style_arc_color(arc, lv_palette_darken(LV_PALETTE_GREY, 3), LV_PART_MAIN);
+  lv_obj_set_style_arc_rounded(arc, true, LV_PART_INDICATOR);
+  lv_obj_set_style_arc_color(arc, arc_color_for_pct(0), LV_PART_INDICATOR);
 
   // Small caption above the numeral: weekly total.
   weekLabel = lv_label_create(scr);
@@ -106,6 +121,7 @@ void ui_init() {
 void ui_set_usage(uint32_t day_tokens, uint32_t week_tokens, uint8_t block_pct, uint32_t block_reset_utc) {
   if (block_pct > 100) block_pct = 100;
   lv_arc_set_value(arc, block_pct);
+  lv_obj_set_style_arc_color(arc, arc_color_for_pct(block_pct), LV_PART_INDICATOR);
 
   char buf[16];
   format_compact(day_tokens, buf, sizeof(buf));
