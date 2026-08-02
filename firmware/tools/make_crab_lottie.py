@@ -91,13 +91,13 @@ MOODS: dict[str, dict] = {
     # the helmet rim sits exactly where brows would be, so drawing both put two
     # overlapping fills in the same place for no visible gain, and overlapping
     # fills are the expensive kind here.
-    "fable_calm":  dict(eye="open",   brow=None,   pupil_dx=0, mouth="flat",  wave=8, bob=2,
+    "fable_calm":  dict(eye="open",   brow=None,   pupil_dx=0, mouth="flat",  wave=8, bob=0,
                         speed=1.3, armour=True),
     # Fable, high/xhigh: sword drawn, swinging at a dragon. The red fire stage
     # behind it lives in ui.cpp so it can fill the panel; its pulse is locked to
     # FABLE_STRIKES. The dragon itself is deliberately static - the sword and
     # the stage carry the motion, and keyframes are what cost heap.
-    "fable_fight": dict(eye="narrow", brow=None,   pupil_dx=0, mouth="open",  wave=0, bob=1,
+    "fable_fight": dict(eye="narrow", brow=None,   pupil_dx=0, mouth="open",  wave=0, bob=0,
                         speed=0.8, armour=True, dragon=True),
     # Heads-down at a desk: laptop open, claws typing, coffee steaming. The
     # crab is raised (body_dy) so the desk and laptop occupy the lower third.
@@ -145,8 +145,9 @@ GUITAR_TILT = 75
 
 # Fable's medieval kit. Steel is a cold grey-blue so it separates from the
 # orange shell, the same complement logic that drove the guitar's teal.
-STEEL = [0.667, 0.706, 0.761]
-STEEL_DARK = [0.435, 0.478, 0.545]
+STEEL = [0.769, 0.804, 0.847]
+STEEL_DARK = [0.478, 0.525, 0.596]
+STEEL_SHADE = [0.196, 0.227, 0.286]
 PLUME = [0.780, 0.220, 0.239]
 BLADE = [0.898, 0.925, 0.949]
 DRAGON = [0.176, 0.353, 0.259]
@@ -384,8 +385,6 @@ def build(mood: str) -> dict:
             group("guard", [rect(13, 4, 1, offset=(0, -3)), fill(STEEL_DARK)], (sx, sy),
                   swing_sword),
             group("claw_sword", [rect(11, 9, 4), fill(SHELL_DARK)], (sx, sy), swing_sword),
-            group("claw_off", [rect(14, 12, 5, offset=(-7, 0)), fill(SHELL_DARK)],
-                  (cx - 18, 46 - dy)),
         ]
     else:
         # Asleep tucks the claws down against the body instead of holding them out.
@@ -402,11 +401,25 @@ def build(mood: str) -> dict:
     # ThorVG charges most for.
     armour = []
     if m.get("armour"):
+        # A first version was a flat slab across the forehead plus a wide plate
+        # over the chest, which read as a bandage and a bib. What makes a helm
+        # legible at this size is not the dome - it is the DARK VISOR SLIT sitting
+        # right on the brow line, with cheek plates framing the face. The dome
+        # then stops just above the eyes rather than crossing them, because the
+        # eyes still have to carry the expression.
+        #
+        # The plume sways on its own so the mood has some life. The body cannot
+        # bob here: armour is rigid, and it is not in the bob list, so a bobbing
+        # head slid straight out from under a stationary helmet.
+        sway = anim([(q[0], [-7]), (q[1], [7]), (q[2], [-7]), (q[3], [7]), (q[4], [-7])])
         armour = [
-            group("plume", [rect(5, 11, 2), fill(PLUME)], (cx, 19 - dy)),
-            group("noseguard", [rect(5, 11, 2), fill(STEEL_DARK)], (cx, 38 - dy)),
-            group("helmet", [rect(46, 13, 5), fill(STEEL)], (cx, 31 - dy)),
-            group("breastplate", [rect(26, 13, 4), fill(STEEL_DARK)], (cx, 53 - dy)),
+            group("nasal", [rect(5, 11, 2), fill(STEEL_DARK)], (cx, 41 - dy)),
+            group("visor", [rect(41, 5, 2), fill(STEEL_SHADE)], (cx, 34 - dy)),
+            group("plume", [rect(6, 15, 3, offset=(0, -7)), fill(PLUME)], (cx, 19 - dy), sway),
+            group("dome", [rect(44, 17, 8), fill(STEEL)], (cx, 26 - dy)),
+            group("cheek_l", [rect(7, 13, 3), fill(STEEL)], (cx - 17, 42 - dy)),
+            group("cheek_r", [rect(7, 13, 3), fill(STEEL)], (cx + 17, 42 - dy)),
+            group("gorget", [rect(28, 8, 4), fill(STEEL_DARK)], (cx, 57 - dy)),
         ]
 
     # The dragon looms in from the upper right, where the sword swings. Static
@@ -415,7 +428,6 @@ def build(mood: str) -> dict:
     if m.get("dragon"):
         dragon = [
             group("dreye", [rect(4, 4, 2), fill(DRAGON_EYE)], (67, 22)),
-            group("drhorn", [rect(3, 10, 1), fill(DRAGON_DARK)], (72, 11), static(24)),
             group("drsnout", [rect(15, 8, 3), fill(DRAGON_DARK)], (55, 28)),
             group("drhead", [rect(24, 18, 7), fill(DRAGON)], (68, 24)),
         ]
