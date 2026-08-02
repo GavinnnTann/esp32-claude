@@ -6,6 +6,10 @@
 #include <stdio.h>
 #include <string.h>
 
+// Private LVGL/ThorVG headers: needed to read the animation's real duration
+// and override lv_lottie_set_src_data's hardcoded 60fps assumption.
+#include <src/widgets/lottie/lv_lottie_private.h>
+
 #include "crab_assets.h"
 
 namespace {
@@ -19,6 +23,9 @@ lv_obj_t *footerLabel = nullptr;
 lv_obj_t *connDot = nullptr;
 lv_obj_t *pageDots[(int)View::_Count] = {};
 lv_obj_t *mascot = nullptr;
+// Allocated once and reused across mood swaps, since the widget itself gets
+// rebuilt each time (see apply_mood).
+void *mascotBuf = nullptr;
 
 // 80x80 rather than 120x120: measured on this board, 80 gives ~19fps with 59KB
 // heap to spare, where 120 gives ~14fps with only 26KB. CPU sits ~90% either
@@ -78,15 +85,45 @@ CrabMood mood_for(const UsageState &s) {
 }
 
 void apply_mood(CrabMood mood) {
-  if (mascot == nullptr || mood == currentMood || mood >= CRAB_MOOD_COUNT) return;
-  currentMood = mood;
+  if (mascotBuf == nullptr || mood == currentMood || mood >= CRAB_MOOD_COUNT) return;
+
+  // The widget is DESTROYED AND REBUILT rather than re-pointed at new data.
+  // ThorVG's Picture::load refuses to load into an already-loaded picture
+  // (`if (paint || surface) return Result::InsufficientCondition;`), and
+  // lv_lottie_set_src_data ignores that return code — so calling it a second
+  // time silently keeps rendering the first animation. That looked exactly
+  // like the mood logic being broken, when the mood was in fact correct.
+  if (mascot != nullptr) lv_obj_delete(mascot);
+
+  // Clear the shared buffer. The canvas is ARGB and the new animation only
+  // paints where its own shapes fall, so without this the previous mood's
+  // pixels survive in the gaps as ghosting.
+  memset(mascotBuf, 0, (size_t)kMascotSide * kMascotSide * 4);
+
   const CrabAsset &a = crab_mood_assets[mood];
+  mascot = lv_lottie_create(lv_screen_active());
+  // Source before buffer, matching LVGL's own example: set_buffer is what
+  // sizes the picture and renders the first frame.
   // Re-parsing the JSON is the deep-recursion path that needs the 32KB stack,
   // so this must stay on state changes only — never per frame.
   lv_lottie_set_src_data(mascot, a.data, a.size);
-  lv_anim_t *anim = lv_lottie_get_anim(mascot);
-  if (anim != nullptr) lv_anim_set_repeat_count(anim, LV_ANIM_REPEAT_INFINITE);
-  Serial.printf("[ui] crab mood -> %d\n", (int)mood);
+  lv_lottie_set_buffer(mascot, kMascotSide, kMascotSide, mascotBuf);
+  lv_obj_center(mascot);
+
+  // lv_lottie_set_src_data assumes 60fps when deriving the duration
+  // (`f_total * 1000 / 60`). These animations are authored at 30fps, so every
+  // one of them played at double speed until this correction. Take the real
+  // duration from ThorVG instead.
+  lv_lottie_t *ld = (lv_lottie_t *)mascot;
+  if (ld->anim != nullptr) {
+    float dur_s = 0;
+    tvg_animation_get_duration(ld->tvg_anim, &dur_s);
+    if (dur_s > 0) ld->anim->duration = (int32_t)(dur_s * 1000.0f);
+    ld->anim->repeat_cnt = LV_ANIM_REPEAT_INFINITE;
+  }
+
+  currentMood = mood;
+  Serial.printf("[ui] crab mood -> %d (heap %u B)\n", (int)mood, (unsigned)ESP.getFreeHeap());
 }
 
 View currentView = View::Session;
@@ -402,16 +439,13 @@ void ui_init() {
   // failed to link by 52KB. heap_caps_aligned_alloc keeps the
   // LV_DRAW_BUF_ALIGN guarantee that plain malloc doesn't promise.
   const size_t mascotBytes = (size_t)kMascotSide * kMascotSide * 4;
-  void *mascotBuf = heap_caps_aligned_alloc(LV_DRAW_BUF_ALIGN, mascotBytes, MALLOC_CAP_8BIT);
+  mascotBuf = heap_caps_aligned_alloc(LV_DRAW_BUF_ALIGN, mascotBytes, MALLOC_CAP_8BIT);
   if (mascotBuf == nullptr) {
     // Not fatal — the other three views are the useful ones. Skipping the
     // widget entirely leaves View::Mascot showing just the arc.
     Serial.printf("[ui] mascot disabled: could not allocate %u B (largest free block %u B)\n",
                   (unsigned)mascotBytes, (unsigned)ESP.getMaxAllocHeap());
   } else {
-    mascot = lv_lottie_create(scr);
-    lv_lottie_set_buffer(mascot, kMascotSide, kMascotSide, mascotBuf);
-    lv_obj_center(mascot);
     apply_mood(CRAB_CHILL);  // placeholder until the first UsageState arrives
     Serial.printf("[ui] mascot %dx%d ready (%u B), heap %u B\n", (int)kMascotSide, (int)kMascotSide,
                   (unsigned)mascotBytes, (unsigned)ESP.getFreeHeap());
