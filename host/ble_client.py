@@ -19,6 +19,13 @@ DEVICE_NAME = "esp32-claude"
 SCAN_TIMEOUT_S = 10.0
 RECONNECT_DELAY_S = 5.0
 
+# How often to re-read state and look for a change. Much shorter than the
+# push/heartbeat interval because the quota percentages — the numbers actually
+# worth watching — come from a cheap local file read; the expensive ccusage
+# subprocesses are TTL-cached inside ccusage_reader, so polling this often
+# costs almost nothing.
+CHECK_INTERVAL_S = 15.0
+
 # UsageState needs STRUCT_SIZE + 3 bytes of ATT header to land in one packet.
 # Derived rather than hardcoded so it tracks the struct automatically — this
 # was 29 when the struct was 26 bytes and would have silently gone stale.
@@ -70,14 +77,28 @@ async def run_forever(poll_interval_s: float, get_state: Callable[[], UsageState
 
         try:
             await _sync_time(client)
+            last_key = None
+            last_push = 0.0
             while client.is_connected and not disconnected.is_set():
                 state = get_state()
-                await _push_state(client, state)
-                print(f"[ble] pushed: {state}")
+
+                # Push when anything the display shows has actually changed, or
+                # as a periodic heartbeat so the device's staleness indicator
+                # doesn't drift toward "stale" while nothing is happening.
+                # `ts` is excluded from the comparison because it changes every
+                # call by definition and would make every poll look like news.
+                key = state.pack()[5:]
+                now = time.monotonic()
+                if key != last_key or (now - last_push) >= poll_interval_s:
+                    await _push_state(client, state)
+                    last_key = key
+                    last_push = now
+                    print(f"[ble] pushed: {state}")
+
                 try:
-                    await asyncio.wait_for(disconnected.wait(), timeout=poll_interval_s)
+                    await asyncio.wait_for(disconnected.wait(), timeout=CHECK_INTERVAL_S)
                 except asyncio.TimeoutError:
-                    pass  # normal: no disconnect within the poll interval
+                    pass  # normal: no disconnect within the check interval
         except Exception as e:
             print(f"[ble] error while connected: {e}")
         finally:

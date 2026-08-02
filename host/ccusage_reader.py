@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import time
 from datetime import datetime, timezone
 
 from transcript_reader import read_current_model_effort
@@ -49,17 +50,22 @@ def _sum_four(entry: dict, keys: tuple[str, str, str, str]) -> int:
 
 _FLAT_TOKEN_KEYS = ("inputTokens", "outputTokens", "cacheCreationTokens", "cacheReadTokens")
 
+# ccusage runs are slow: three `npx` subprocess spawns that each re-scan every
+# transcript, several seconds total. The quota percentages, by contrast, come
+# from a single local JSON read costing microseconds. Caching the ccusage half
+# lets the caller poll frequently for fresh percentages without paying for
+# subprocesses every time.
+_CCUSAGE_TTL_S = 300
+_ccusage_cache: dict | None = None
+_ccusage_cache_at: float = 0.0
 
-def read_usage_state() -> UsageState:
-    """Build the current UsageState from ccusage plus two non-ccusage sources.
 
-    Token/cost totals come from `ccusage daily`, `weekly`, and `blocks`. The
-    quota *percentages* do not: they're read from Claude Code's own cache via
-    `usage_limits.py`, because they're weighted (long contexts cost more even
-    when cached) and can't be derived from raw token counts. Model and effort
-    come from `transcript_reader.py` for the same "ccusage doesn't have it"
-    reason.
-    """
+def _ccusage_totals() -> dict:
+    """Token/cost totals from ccusage, cached for _CCUSAGE_TTL_S."""
+    global _ccusage_cache, _ccusage_cache_at
+    if _ccusage_cache is not None and (time.monotonic() - _ccusage_cache_at) < _CCUSAGE_TTL_S:
+        return _ccusage_cache
+
     daily = _run_ccusage("daily")
     weekly = _run_ccusage("weekly")
     blocks = _run_ccusage("blocks")
@@ -101,6 +107,32 @@ def read_usage_state() -> UsageState:
         block_tokens = 0
         block_cents = 0
 
+    _ccusage_cache = {
+        "day_tokens": day_tokens,
+        "day_cents": day_cents,
+        "week_tokens": week_tokens,
+        "week_cents": week_cents,
+        "block_tokens": block_tokens,
+        "block_cents": block_cents,
+    }
+    _ccusage_cache_at = time.monotonic()
+    return _ccusage_cache
+
+
+def read_usage_state() -> UsageState:
+    """Build the current UsageState from ccusage plus two non-ccusage sources.
+
+    Token/cost totals come from `ccusage daily`, `weekly`, and `blocks`, cached
+    for 5 minutes because those are slow subprocess calls. The quota
+    *percentages* are re-read every call: they come from Claude Code's own
+    cache in `~/.claude.json` via `usage_limits.py`, which is a cheap local
+    file read, and they're what the user actually watches change. Model and
+    effort likewise come from `transcript_reader.py`, also cheap.
+
+    So calling this often is fine — it only pays for ccusage every 5 minutes.
+    """
+    totals = _ccusage_totals()
+
     # Not from ccusage — it drops `effort` entirely during aggregation, so
     # these come straight from Claude Code's transcripts.
     model, effort = read_current_model_effort()
@@ -115,16 +147,11 @@ def read_usage_state() -> UsageState:
         ts=int(datetime.now(timezone.utc).timestamp()),
         model=model,
         effort=effort,
-        day_tokens=day_tokens,
-        day_cents=day_cents,
-        week_tokens=week_tokens,
-        week_cents=week_cents,
-        block_tokens=block_tokens,
-        block_cents=block_cents,
         session_reset=limits.session_reset,
         week_reset=limits.week_reset,
         limits_fetched=limits.fetched_at,
         session_pct=limits.session_pct,
         week_pct=limits.week_pct,
         limits_ok=1 if limits.ok else 0,
+        **totals,
     )
