@@ -26,8 +26,8 @@ static UsageState lastState{};
 static bool haveState = false;
 static uint32_t lastStateEpoch = 0;
 
-// ThorVG's Lottie parser and path rasteriser recurse deeply — measured at
-// ~21KB of stack — and every draw runs on whichever task calls
+// ThorVG's Lottie parser and path rasteriser recurse deeply - measured at
+// ~21KB of stack - and every draw runs on whichever task calls
 // lv_timer_handler(), i.e. Arduino's loopTask, whose default stack is 8KB.
 // That overflow crash-loops with LoadProhibited *regardless of free heap*,
 // so shrinking the animation never helps and it looks like a memory bug.
@@ -130,7 +130,7 @@ void loop() {
 
   ConnState connState;
   if (!connected) {
-    // handover.md #5: never blank the screen on disconnect — keep showing
+    // handover.md #5: never blank the screen on disconnect - keep showing
     // cached values (ui_set_usage above already did its job) with an age.
     connState = ConnState::Disconnected;
   } else if (haveState && age <= STALE_AFTER_S) {
@@ -141,7 +141,7 @@ void loop() {
 
   // Only touch the labels when something visibly changed. Rewriting them every
   // ~5ms marks them dirty every iteration, forcing LVGL to re-render the text
-  // (and anything overlapping it) continuously — pure waste. Age is compared
+  // (and anything overlapping it) continuously - pure waste. Age is compared
   // directly because the caption only ever shows whole seconds/minutes/hours.
   static ConnState lastConnState = ConnState::Disconnected;
   static uint32_t lastShownAge = UINT32_MAX;
