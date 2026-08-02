@@ -40,7 +40,8 @@ EYE_DARK = [0.106, 0.098, 0.094]
 # neutral. Brows, eye shape and props do the work now; size alone does not.
 #
 #   eye      : "open" | "squint" | "narrow" | "happy" (^^ arcs) | "droop" | "closed"
-#   brow     : None | "angry" (inner ends down) | "tired" (outer ends down) | "raised"
+#   brow     : None | "angry" (inner ends down) | "furrow" (a mild angry)
+#              | "tired" (outer ends down) | "raised"
 #   pupil_dx : pupil offset, for looking off to one side
 #   mouth    : "grin" | "flat" | "small" | "open" | "smile"
 #   wave     : claw swing in degrees (0 = arms down)
@@ -73,14 +74,15 @@ MOODS: dict[str, dict] = {
                     speed=0.8, guitar=True),
     # Heads-down at a desk: laptop open, claws typing, coffee steaming. The
     # crab is raised (body_dy) so the desk and laptop occupy the lower third.
-    # Half-lidded and smiling under neutral brows: absorbed in the work. Two
-    # earlier tries were worse - "angry" brows made it a scowl and borrowed
-    # focused's whole face, then wide-open eyes with no brows read as a stare.
-    # The desk carries the identification, so the face only has to look calm.
+    # Hunched down behind the screen: body_dy is low enough that the laptop lid
+    # covers the mouth entirely, so the expression is carried by squinted eyes
+    # and lightly furrowed brows. The mouth is still drawn (it sits behind the
+    # lid in the z-order) but deliberately kept to the cheapest "flat" shape,
+    # since nothing that is never seen should cost heap on this board.
     # bob=0 deliberately: the typing claws and the steam already carry the
     # motion, and the body bob is what makes an asset expensive (see below).
-    "working": dict(eye="squint", brow="raised", pupil_dx=0, mouth="smile", wave=0,  bob=0,
-                    speed=0.9, desk=True, body_dy=20),
+    "working": dict(eye="squint", brow="furrow", pupil_dx=0, mouth="flat",  wave=0,  bob=0,
+                    speed=0.9, desk=True, body_dy=14),
 }
 
 ZZZ_COLOR = [0.949, 0.949, 0.980]
@@ -263,8 +265,8 @@ def build(mood: str) -> dict:
     # as angry, which is exactly how focused and sleepy first came out.
     brow = m.get("brow")
     if brow:
-        tilt = {"angry": -22, "tired": 22, "raised": 0}[brow]
-        brow_y = {"angry": 33, "tired": 32, "raised": 30}[brow]
+        tilt = {"angry": -22, "furrow": -10, "tired": 22, "raised": 0}[brow]
+        brow_y = {"angry": 33, "furrow": 32, "tired": 32, "raised": 30}[brow]
         for side, dx in ((-1, -10), (1, 10)):
             face.append(group(f"brow{dx}", [rect(12, 3, 1), fill(SHELL_DARK)],
                               (cx + dx, brow_y - dy), static(tilt * side)))
@@ -413,8 +415,11 @@ def build(mood: str) -> dict:
     elif m.get("bed"):
         shapes = [*zzz, *mouths, *face, *bed_front, shell, *limbs, *legs, *bed_back]
     elif m.get("desk"):
-        # Face above the lid, laptop/mug in front of the body, desk behind all.
-        shapes = [*mouths, *face, *desk_front, shell, *legs, *desk_back]
+        # Eyes above the lid, but the MOUTH behind it - that is what lets the
+        # lowered head read as hunched down behind the screen. Putting mouths
+        # in front (as every other mood does) drew it straight across the
+        # laptop as a stray bar.
+        shapes = [*face, *desk_front, *mouths, shell, *legs, *desk_back]
     else:
         shapes = [*zzz, *mouths, *face, shell, *limbs, *legs]
 
