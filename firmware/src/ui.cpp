@@ -102,12 +102,13 @@ CrabMood mood_for(const UsageState &s) {
   // "xhigh" must be tested before "high" - it contains it as a substring, so
   // the looser check would swallow it and the guitar would never appear.
   if (contains(s.effort, sizeof(s.effort), "xhigh")) return CRAB_ROCKING;
-  if (contains(s.effort, sizeof(s.effort), "high")) return CRAB_FOCUSED;
+  // Effort drives the desk scene, model drives the face. Reasoning effort is
+  // the better match for "heads-down at a laptop": it is the setting that
+  // actually means grinding, and it changes with the work rather than with
+  // whatever model happens to be selected.
+  if (contains(s.effort, sizeof(s.effort), "high")) return CRAB_WORKING;
   if (contains(s.model, sizeof(s.model), "haiku")) return CRAB_HAPPY;
-  // Opus gets the desk scene rather than sharing FOCUSED with high effort.
-  // Every mood now has exactly one cause, so what you see names what is
-  // happening - two triggers for one face made the display ambiguous.
-  if (contains(s.model, sizeof(s.model), "opus")) return CRAB_WORKING;
+  if (contains(s.model, sizeof(s.model), "opus")) return CRAB_FOCUSED;
   return CRAB_CHILL;
 }
 

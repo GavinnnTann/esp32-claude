@@ -44,15 +44,16 @@ the session is spent would be actively misleading.
 | Mood | | When | Tell |
 |---|---|---|---|
 | **rocking** | <img src="assets/crab-rocking.gif" width="100"> | `xhigh` effort | strums a guitar on a purple stage, echoing the Clawd that Claude Code itself shows at that level |
-| **focused** | <img src="assets/crab-focused.gif" width="100"> | `high` effort | hard angled brows, narrow eyes, almost no movement |
-| **working** | <img src="assets/crab-working.gif" width="100"> | Opus | hunched behind a laptop, typing, and every so often it stops to tilt the mug back for a drink |
+| **working** | <img src="assets/crab-working.gif" width="100"> | `high` effort | hunched behind a laptop, typing, and every so often it stops to tilt the mug back for a drink |
+| **focused** | <img src="assets/crab-focused.gif" width="100"> | Opus | hard angled brows, narrow eyes, almost no movement |
 | **happy** | <img src="assets/crab-happy.gif" width="100"> | Haiku | eyes shut in `^^` arcs, wide grin, blushing, bouncy |
 | **chill** | <img src="assets/crab-chill.gif" width="100"> | everything else | raised brows, wide eyes glancing aside, easy sway |
 | **sleepy** | <img src="assets/crab-sleepy.gif" width="100"> | session ≥ 85% | heavy lids, drooping brows, a drifting `z` |
 | **asleep** | <img src="assets/crab-asleep.gif" width="100"> | session ≥ 100% | tucked into bed under a blanket, snoozing `z`s |
 
-Every mood has exactly one trigger. `focused` used to cover both `high` effort
-*and* Opus, so one face meant two unrelated things; the desk scene now takes Opus.
+Every mood has exactly one trigger. Effort drives the desk scene and model drives
+the face: reasoning effort is what actually means grinding, and it changes with
+the work rather than with whichever model happens to be selected.
 
 Each mood is separated by a *categorical* feature — brow angle, eye shape, a
 prop — rather than by size. An earlier version varied only eye height (10 / 7 /
