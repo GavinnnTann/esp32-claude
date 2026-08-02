@@ -26,6 +26,24 @@ static UsageState lastState{};
 static bool haveState = false;
 static uint32_t lastStateEpoch = 0;
 
+// ThorVG's Lottie parser and path rasteriser recurse deeply — measured at
+// ~21KB of stack — and every draw runs on whichever task calls
+// lv_timer_handler(), i.e. Arduino's loopTask, whose default stack is 8KB.
+// That overflow crash-loops with LoadProhibited *regardless of free heap*,
+// so shrinking the animation never helps and it looks like a memory bug.
+//
+// LVGL's own guard (#error "Increase LV_DRAW_THREAD_STACK_SIZE to at least
+// 32KB for ThorVG") is nested inside `#if LV_USE_OS`, so a no-OS build like
+// ours gets no warning at all. LV_DRAW_THREAD_STACK_SIZE in lv_conf.h is
+// inert here for the same reason.
+//
+// arduino-esp32 declares this __attribute__((weak)), so overriding it here is
+// enough: no patching sdkconfig.h in the framework package (which a reinstall
+// would silently undo) and no -D flag a header can redefine out from under us.
+size_t getArduinoLoopTaskStackSize(void) {
+  return 32 * 1024;
+}
+
 static void lv_log_print_cb(lv_log_level_t level, const char *buf) {
   Serial.print("[lvgl] ");
   Serial.println(buf);

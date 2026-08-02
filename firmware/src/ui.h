@@ -12,6 +12,7 @@ enum class View : uint8_t {
   Session = 0,
   Weekly,
   Details,
+  Mascot,
   _Count,
 };
 

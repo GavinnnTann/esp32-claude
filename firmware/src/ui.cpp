@@ -1,8 +1,15 @@
 #include "ui.h"
 
+#include <Arduino.h>
+#include <esp_heap_caps.h>
 #include <lvgl.h>
 #include <stdio.h>
 #include <string.h>
+
+extern "C" {
+extern const uint8_t lottie_mascot_asset[];
+extern const size_t lottie_mascot_asset_size;
+}
 
 namespace {
 
@@ -14,6 +21,12 @@ lv_obj_t *resetLabel = nullptr;
 lv_obj_t *footerLabel = nullptr;
 lv_obj_t *connDot = nullptr;
 lv_obj_t *pageDots[(int)View::_Count] = {};
+lv_obj_t *mascot = nullptr;
+
+// 80x80 rather than 120x120: measured on this board, 80 gives ~19fps with 59KB
+// heap to spare, where 120 gives ~14fps with only 26KB. CPU sits ~90% either
+// way (LVGL renders as fast as it can), so the extra size buys nothing.
+constexpr int32_t kMascotSide = 80;
 
 View currentView = View::Session;
 
@@ -129,9 +142,54 @@ void set_tokens_row(uint32_t tokens, uint32_t cents) {
   lv_label_set_text(tokensLabel, buf);
 }
 
+// ThorVG rasterises in software and pegs the CPU near 90% while animating, so
+// the mascot only runs on its own view. Hiding alone isn't enough — the LVGL
+// animation keeps ticking and re-rendering the canvas — so the animation is
+// paused too, which is what actually returns the CPU.
+void set_mascot_active(bool active) {
+  if (mascot == nullptr) return;
+  if (active) {
+    lv_obj_remove_flag(mascot, LV_OBJ_FLAG_HIDDEN);
+  } else {
+    lv_obj_add_flag(mascot, LV_OBJ_FLAG_HIDDEN);
+  }
+  lv_anim_t *a = lv_lottie_get_anim(mascot);
+  if (a != nullptr) {
+    if (active) {
+      lv_anim_resume(a);
+    } else {
+      lv_anim_pause(a);
+    }
+  }
+}
+
 // Redraws every view-dependent widget from `cachedState`.
 void render_view() {
   refresh_page_dots();
+
+  bool onMascot = (currentView == View::Mascot);
+  set_mascot_active(onMascot);
+
+  // The mascot view is just the animation plus the arc, so the text rows would
+  // only clutter it.
+  lv_obj_t *textRows[] = {titleLabel, pctLabel, tokensLabel, resetLabel};
+  for (lv_obj_t *o : textRows) {
+    if (o == nullptr) continue;
+    if (onMascot) {
+      lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
+    } else {
+      lv_obj_remove_flag(o, LV_OBJ_FLAG_HIDDEN);
+    }
+  }
+  if (onMascot) {
+    // Still colour the rim by session usage so the view carries meaning.
+    if (haveCached && cachedState.limits_ok) {
+      uint8_t pct = cachedState.session_pct > 100 ? 100 : cachedState.session_pct;
+      lv_arc_set_value(arc, pct);
+      lv_obj_set_style_arc_color(arc, color_for_pct(pct), LV_PART_INDICATOR);
+    }
+    return;
+  }
 
   static const char *kTitles[] = {"SESSION", "WEEKLY", "TODAY"};
   lv_label_set_text(titleLabel, kTitles[(int)currentView]);
@@ -264,7 +322,31 @@ void ui_init() {
   lv_led_set_color(connDot, lv_palette_main(LV_PALETTE_GREY));
   lv_led_off(connDot);
 
+  // Mascot canvas comes from the heap, not a static array: 80x80x4 = 25,600B
+  // would blow the ESP32's dram0_0_seg static segment, which is capped
+  // separately from (and much smaller than) the heap. A static 120x120 version
+  // failed to link by 52KB. heap_caps_aligned_alloc keeps the
+  // LV_DRAW_BUF_ALIGN guarantee that plain malloc doesn't promise.
+  const size_t mascotBytes = (size_t)kMascotSide * kMascotSide * 4;
+  void *mascotBuf = heap_caps_aligned_alloc(LV_DRAW_BUF_ALIGN, mascotBytes, MALLOC_CAP_8BIT);
+  if (mascotBuf == nullptr) {
+    // Not fatal — the other three views are the useful ones. Skipping the
+    // widget entirely leaves View::Mascot showing just the arc.
+    Serial.printf("[ui] mascot disabled: could not allocate %u B (largest free block %u B)\n",
+                  (unsigned)mascotBytes, (unsigned)ESP.getMaxAllocHeap());
+  } else {
+    mascot = lv_lottie_create(scr);
+    lv_lottie_set_src_data(mascot, lottie_mascot_asset, lottie_mascot_asset_size);
+    lv_lottie_set_buffer(mascot, kMascotSide, kMascotSide, mascotBuf);
+    lv_obj_center(mascot);
+    lv_anim_t *a = lv_lottie_get_anim(mascot);
+    if (a != nullptr) lv_anim_set_repeat_count(a, LV_ANIM_REPEAT_INFINITE);
+    Serial.printf("[ui] mascot %dx%d ready (%u B), heap %u B\n", (int)kMascotSide, (int)kMascotSide,
+                  (unsigned)mascotBytes, (unsigned)ESP.getFreeHeap());
+  }
+
   refresh_page_dots();
+  render_view();  // applies the initial show/hide + paused state
 }
 
 void ui_set_usage(const UsageState &state) {
