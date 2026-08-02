@@ -64,6 +64,8 @@ EYE_DARK = [0.106, 0.098, 0.094]
 #   dots     : "waiting" dots above the head, lighting in sequence
 #   knight   : chibi-knight build - the helm REPLACES the head (Fable)
 #   dragon   : sword + dragon, for the Fable fight
+#   doze     : tired version of a scene mood - keeps the props and the set,
+#              stops the busy motion. See the note above the *_tired moods.
 MOODS: dict[str, dict] = {
     # Eyes shut in happy arcs + big grin + blush + a lively bounce. Nothing
     # else uses arc eyes, so this is unmistakable at a glance.
@@ -107,6 +109,29 @@ MOODS: dict[str, dict] = {
     # the stage carry the motion, and keyframes are what cost heap.
     "fable_fight": dict(eye="wide",   brow=None,   pupil_dx=0, mouth="open",  wave=0, bob=0,
                         speed=0.8, knight=True, dragon=True),
+    # Tired variants of the three "scene" moods. When the session passes
+    # kSleepyPct the crab does NOT cut to the generic sleepy animation - it
+    # stays in whatever set it was already in and nods off there. Swapping a
+    # crab at a desk for a bare crab on black read as a different character
+    # appearing, which is exactly the abruptness these avoid.
+    #
+    # Each one is CHEAPER than the mood it replaces, not dearer: the busy
+    # motion is what costs. The desk drops the coffee sip (so the loop goes
+    # back to 60 frames from 180) and the steam, because the coffee has gone
+    # cold; the guitar stops being strummed; the knight lowers its sword.
+    # Eyes SHUT, not drooping, on all three. Partly because a half-lidded eye
+    # behind Fable's visor just read as a mistake, and partly because "droop"
+    # is six groups (pupils, whites, and two lids that OVERLAP the whites)
+    # against two for "closed" - and the desk scene, already the heaviest mood
+    # in the firmware, was left at 10,228B largest block with droop, which is
+    # the exact figure that has preceded every arc-mask failure here. The set
+    # tells you which state this is; the eyes only have to say "asleep".
+    "working_tired": dict(eye="closed", brow="tired", pupil_dx=0, mouth="small", wave=0, bob=1,
+                          speed=2.4, desk=True, body_dy=14, zzz=1, doze=True),
+    "rocking_tired": dict(eye="closed", brow="tired", pupil_dx=0, mouth="small", wave=0, bob=1,
+                          speed=2.6, guitar=True, zzz=1, doze=True),
+    "fable_tired":   dict(eye="wide",  brow=None,    pupil_dx=0, mouth="small", wave=3, bob=0,
+                          speed=2.6, knight=True, zzz=1, doze=True),
     # Heads-down at a desk: laptop open, claws typing, coffee steaming. The
     # crab is raised (body_dy) so the desk and laptop occupy the lower third.
     # Hunched down behind the screen: body_dy is low enough that the laptop lid
@@ -119,6 +144,10 @@ MOODS: dict[str, dict] = {
     "working": dict(eye="squint", brow="furrow", pupil_dx=0, mouth="flat",  wave=0,  bob=0,
                     speed=0.9, desk=True, body_dy=14, loop=180, sip=True),
 }
+
+# mood -> mood it borrows its artwork from. Same bytes, separate CrabMood, so
+# the firmware can give it a different stage. See stage_for() in ui.cpp.
+ALIASES: dict[str, str] = {"rocking_calm": "rocking"}
 
 ZZZ_COLOR = [0.949, 0.949, 0.980]
 PILLOW = [0.925, 0.906, 0.859]
@@ -374,7 +403,7 @@ def build(mood: str) -> dict:
             # Strumming claw sweeps over the body, hinged at the shoulder. Kept
             # small so it doesn't swallow the neck it's meant to be strumming.
             group("claw_strum", [rect(11, 9, 4, offset=(-6, 0)), fill(SHELL_DARK)],
-                  (cx + 2, 60), strum),
+                  (cx + 2, 60), None if m.get("doze") else strum),
             # Fretting claw pins the far end of the neck, held still.
             group("claw_hold", [rect(10, 9, 4), fill(SHELL_DARK)], (cx + 20, 55)),
             group("neck", [rect(5, 26, 2, offset=(0, -17)), fill(GUITAR_NECK)],
@@ -440,10 +469,17 @@ def build(mood: str) -> dict:
         ]
         eye_dx = 9
         knight = [
-            *[group(f"kpupil{d}", [rect(5, 6, 2), fill(EYE_DARK)], (cx + d, 40))
-              for d in (-eye_dx, eye_dx)],
-            *[group(f"keye{d}", [rect(10, 8, 4), fill(EYE_WHITE)], (cx + d, 40))
-              for d in (-eye_dx, eye_dx)],
+            # Dozing shuts the eyes outright rather than half-lidding them.
+            # Behind a visor there is no brow or lash to carry "heavy lids", so
+            # a squashed white oval just read as a mistake; a plain dark lid bar
+            # is unambiguous. It is also two groups instead of four.
+            *([group(f"klid{d}", [rect(11, 3, 1), fill(EYE_DARK)], (cx + d, 41))
+               for d in (-eye_dx, eye_dx)]
+              if m.get("doze") else
+              [*[group(f"kpupil{d}", [rect(5, 6, 2), fill(EYE_DARK)], (cx + d, 40))
+                 for d in (-eye_dx, eye_dx)],
+               *[group(f"keye{d}", [rect(10, 8, 4), fill(EYE_WHITE)], (cx + d, 40))
+                 for d in (-eye_dx, eye_dx)]]),
             group("kface", [rect(32, 10, 3), fill(SHELL)], (cx, 40)),
             group("visor", [rect(37, 14, 4), fill(VISOR)], (cx, 40)),
             *rivets,
@@ -602,15 +638,20 @@ def build(mood: str) -> dict:
             mug_part("coffee", (9, 3, 1), COFFEE, (0, -3)),
             mug_part("mug", (12, 11, 3), MUG, (0, 0)),
             mug_part("handle", (4, 6, 2), MUG, (8, 0)),
-            sip_claw(cx - 12, 59, tap_a, (26, 47)),
-            tap(cx + 12, 59, tap_b),
+            sip_claw(cx - 12, 59, tap_a, (26, 47)) if not m.get("doze")
+            else group("restclaw_l", [rect(9, 8, 3), fill(SHELL_DARK)], (cx - 12, 59)),
+            tap(cx + 12, 59, tap_b) if not m.get("doze")
+            else group("restclaw_r", [rect(9, 8, 3), fill(SHELL_DARK)], (cx + 12, 59)),
             group("lapbase", [rect(40, 5, 2), fill(LAPTOP)], (cx, 60)),
             group("lapglow", [rect(28, 2, 1), fill(SCREEN_GLOW)], (cx, 43)),
             group("lapdid", [rect(34, 24, 3), fill(LAPTOP_DARK)], (cx, 46)),
         ]
-        desk_back = [
+        steam = [] if m.get("doze") else [
             group("steam1", [rect(3, 7, 1), fill(STEAM, puff(0))], (9, 44)),
             group("steam2", [rect(3, 8, 1), fill(STEAM, puff(1))], (15, 41)),
+        ]
+        desk_back = [
+            *steam,
             group("desk", [rect(80, 16, 0), fill(DESK)], (cx, 72)),
             group("deskedge", [rect(80, 3, 0), fill(DESK_EDGE)], (cx, 63)),
         ]
@@ -636,9 +677,9 @@ def build(mood: str) -> dict:
     if m.get("knight") and m.get("dragon"):
         # Sword frontmost, then the dragon leaning in, then the helm over the
         # crab's own head.
-        shapes = [*limbs, *dragon, *knight]
+        shapes = [*zzz, *limbs, *dragon, *knight]
     elif m.get("knight"):
-        shapes = [*knight, *limbs]
+        shapes = [*zzz, *knight, *limbs]
     elif m.get("guitar"):
         shapes = [*zzz, *dots, *mouths, *face, *limbs, shell, *legs]
     elif m.get("bed"):
@@ -648,7 +689,7 @@ def build(mood: str) -> dict:
         # lowered head read as hunched down behind the screen. Putting mouths
         # in front (as every other mood does) drew it straight across the
         # laptop as a stray bar.
-        shapes = [*face, *desk_front, *mouths, shell, *legs, *desk_back]
+        shapes = [*zzz, *face, *desk_front, *mouths, shell, *legs, *desk_back]
     else:
         shapes = [*zzz, *dots, *mouths, *face, shell, *limbs, *legs]
 
@@ -677,7 +718,10 @@ def build(mood: str) -> dict:
 
 
 def emit_c(blobs: dict[str, bytes], out_c: Path, out_h: Path) -> None:
-    names = list(blobs)
+    # Aliases get an enum entry and an array slot, but point at the original's
+    # bytes rather than a second copy.
+    names = list(blobs) + list(ALIASES)
+    source = {**{n: n for n in blobs}, **ALIASES}
 
     h = ["/* Generated by tools/make_crab_lottie.py - do not edit. */\n",
          "#pragma once\n\n#include <stddef.h>\n#include <stdint.h>\n\n",
@@ -703,7 +747,8 @@ def emit_c(blobs: dict[str, bytes], out_c: Path, out_h: Path) -> None:
         c.append("};\n\n")
     c.append("const CrabAsset crab_mood_assets[CRAB_MOOD_COUNT] = {\n")
     for n in names:
-        c.append(f"    [CRAB_{n.upper()}] = {{ crab_{n}, sizeof(crab_{n}) }},\n")
+        src = source[n]
+        c.append(f"    [CRAB_{n.upper()}] = {{ crab_{src}, sizeof(crab_{src}) }},\n")
     c.append("};\n")
     out_c.write_text("".join(c), encoding="utf-8")
 

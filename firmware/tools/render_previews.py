@@ -24,15 +24,19 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-MOODS = ["happy", "focused", "chill", "working", "idle",
-         "fable_calm", "fable_fight", "sleepy", "asleep", "rocking"]
+MOODS = ["fable_calm", "fable_fight", "rocking_calm", "rocking",
+         "focused", "working", "chill", "happy",
+         "idle", "fable_tired", "rocking_tired", "working_tired",
+         "sleepy", "asleep"]
 SCALE = 3
 # The combined grid is rendered at full SCALE then downsampled, so it stays
 # crisp while keeping the GIF small enough to sit at the top of a README.
 GRID_SCALE = 2
 GRID_FRAMES = 40
 GRID_FPS = 20
-STAGE_MOODS = {"rocking", "fable_fight"}
+STAGE_MOODS = {"rocking", "rocking_calm", "rocking_tired", "fable_fight"}
+STAGE_KIND = {"fable_fight": "fire", "rocking_tired": "rockstill",
+              "rocking_calm": "rockstill"}
 STAGE_BG = (46, 24, 81, 255)
 # Fable fights on a dark field lit by fire; rocking plays on a purple stage.
 FIRE_BG = (18, 5, 4, 255)
@@ -73,7 +77,9 @@ def render(doc, frame, stage=False):
         else:
             img.paste(Image.new("RGBA", img.size, STAGE_BG), (0, 0))
             dr = ImageDraw.Draw(img, "RGBA")
-            pulse = 0.9 if (frame % 15) < 7 else 0.25
+            # RockStill in ui.cpp: lights on, performer asleep. No pulse, and
+            # the grid sits at a fixed low opacity.
+            pulse = 0.3 if stage == "rockstill" else (0.9 if (frame % 15) < 7 else 0.25)
             a = int(255 * pulse)
             for i in range(4):
                 p = int(w * SCALE * (i + 1) / 5)
@@ -131,7 +137,7 @@ def main(argv):
 
     # Per-mood animated GIFs.
     for m, doc in docs.items():
-        stage = "fire" if m == "fable_fight" else (m in STAGE_MOODS)
+        stage = STAGE_KIND.get(m, m in STAGE_MOODS)
         step = 2
         frames = [render(doc, f, stage).convert("P", palette=Image.ADAPTIVE)
                   for f in range(0, doc["op"], step)]
@@ -146,7 +152,7 @@ def main(argv):
     w = docs["happy"]["w"] * SCALE
     sheet = Image.new("RGBA", (w * len(MOODS), w), (10, 10, 10, 255))
     for i, m in enumerate(MOODS):
-        sheet.paste(render(docs[m], 4, "fire" if m == "fable_fight" else (m in STAGE_MOODS)), (i * w, 0))
+        sheet.paste(render(docs[m], 4, STAGE_KIND.get(m, m in STAGE_MOODS)), (i * w, 0))
     sheet.save(out / "crab-moods.png")
     print("  crab-moods.png")
 
@@ -168,7 +174,7 @@ def main(argv):
         dr = ImageDraw.Draw(img)
         for j, m in enumerate(MOODS):
             doc = docs[m]
-            frame = render(doc, u * doc["op"], "fire" if m == "fable_fight" else (m in STAGE_MOODS))
+            frame = render(doc, u * doc["op"], STAGE_KIND.get(m, m in STAGE_MOODS))
             x, y = (j % cols) * cell, (j // cols) * (cell + pad)
             img.paste(frame.resize((cell, cell), Image.NEAREST), (x, y))
             dr.text((x + 4, y + cell + 3), m, fill=(200, 200, 200, 255))

@@ -47,7 +47,7 @@ const lv_color_t kFireGlow = lv_color_hex(0x8C261A);
 // beat four times per loop; see FABLE_STRIKES in tools/make_crab_lottie.py.
 constexpr uint32_t kStagePulseMs = 250;
 
-enum class Stage : uint8_t { None, Rock, Fire };
+enum class Stage : uint8_t { None, Rock, RockStill, Fire };
 Stage currentStage = Stage::None;
 
 // 96x96 = 36,864 bytes, and it must be ARGB8888 - lv_lottie_set_buffer hands
@@ -107,16 +107,69 @@ bool contains(const char *hay, size_t hay_len, const char *needle) {
   return false;
 }
 
+// The mood the model and effort alone would produce, before quota or idle get
+// a say. Split out because the tired variants need to know which SET the crab
+// is standing in, which means resolving this even when quota overrides it.
+//
+// Every model has its own pair, split at "high":
+//
+//   Fable   high+ fights a dragon     below  stands watch
+//   Opus    high+ rocks out           below  plays on, stage not pulsing
+//   Sonnet  high+ heads-down at desk  below  focused
+//   Haiku   high+ delighted           below  chilled
+//
+// Note "high" matches "xhigh" as a substring, and that is now exactly what is
+// wanted everywhere - "high and above" is one test. The old code had to check
+// xhigh first to stop the looser test swallowing it; nothing needs that split
+// any more.
+CrabMood base_mood(const UsageState &s) {
+  const bool hard = contains(s.effort, sizeof(s.effort), "high");
+  if (contains(s.model, sizeof(s.model), "fable")) {
+    return hard ? CRAB_FABLE_FIGHT : CRAB_FABLE_CALM;
+  }
+  if (contains(s.model, sizeof(s.model), "opus")) {
+    return hard ? CRAB_ROCKING : CRAB_ROCKING_CALM;
+  }
+  if (contains(s.model, sizeof(s.model), "sonnet")) {
+    return hard ? CRAB_WORKING : CRAB_FOCUSED;
+  }
+  if (contains(s.model, sizeof(s.model), "haiku")) {
+    return hard ? CRAB_HAPPY : CRAB_CHILL;
+  }
+  // Unknown model - fall back on effort alone rather than guessing a family.
+  return hard ? CRAB_WORKING : CRAB_CHILL;
+}
+
+// Running low on session quota, the crab nods off WHERE IT IS rather than
+// cutting to the generic sleepy animation. Swapping a crab at a desk for a
+// bare crab on black read as a different character appearing - the whole point
+// of these variants is that the transition is a change of posture, not of set.
+CrabMood tired_for(CrabMood base) {
+  switch (base) {
+    case CRAB_WORKING: return CRAB_WORKING_TIRED;
+    case CRAB_ROCKING:
+    case CRAB_ROCKING_CALM: return CRAB_ROCKING_TIRED;
+    case CRAB_FABLE_CALM:
+    case CRAB_FABLE_FIGHT: return CRAB_FABLE_TIRED;
+    default: return CRAB_SLEEPY;  // moods with no set of their own
+  }
+}
+
 // Session quota wins over everything: a crab that looks alert while the
-// session is exhausted would be actively misleading. Below that, the mood
-// reflects which model and effort level is doing the work.
+// session is exhausted would be actively misleading.
 CrabMood mood_for(const UsageState &s) {
+  const CrabMood base = base_mood(s);
+
   // Only trust the quota for mood while its window is still live. Otherwise a
   // stale 100% would leave the crab asleep long after the session had reset.
   if (s.limits_ok && quota_window_current(s.session_reset)) {
+    // 100% keeps the shared bed scene deliberately: at that point the session
+    // is spent and the crab has stopped working, so leaving it slumped at its
+    // desk would say the opposite of what has happened.
     if (s.session_pct >= kAsleepPct) return CRAB_ASLEEP;
-    if (s.session_pct >= kSleepyPct) return CRAB_SLEEPY;
+    if (s.session_pct >= kSleepyPct) return tired_for(base);
   }
+
   // Nothing written to a transcript in a while: Claude is waiting on you, and
   // showing it mid-grind would be wrong. This outranks model and effort
   // because those describe the last thing that RAN, not what is happening now.
@@ -127,25 +180,7 @@ CrabMood mood_for(const UsageState &s) {
     return CRAB_IDLE;
   }
 
-  // "high" also matches "xhigh" as a substring. That is deliberate here: Fable
-  // fights across high AND xhigh, so one test covers both.
-  const bool hard = contains(s.effort, sizeof(s.effort), "high");
-  if (contains(s.model, sizeof(s.model), "fable")) {
-    return hard ? CRAB_FABLE_FIGHT : CRAB_FABLE_CALM;
-  }
-
-  // Below here the substring overlap is a hazard, not a help: "xhigh" must be
-  // tested before the looser check or it would be swallowed and the guitar
-  // would never appear.
-  if (contains(s.effort, sizeof(s.effort), "xhigh")) return CRAB_ROCKING;
-  // Effort drives the desk scene, model drives the face. Reasoning effort is
-  // the better match for "heads-down at a laptop": it is the setting that
-  // actually means grinding, and it changes with the work rather than with
-  // whatever model happens to be selected.
-  if (hard) return CRAB_WORKING;
-  if (contains(s.model, sizeof(s.model), "haiku")) return CRAB_HAPPY;
-  if (contains(s.model, sizeof(s.model), "opus")) return CRAB_FOCUSED;
-  return CRAB_CHILL;
+  return base;
 }
 
 #ifdef CRAB_MOOD_DEMO
@@ -337,7 +372,12 @@ void fire_mix_cb(void *var, int32_t v) {
 // making ThorVG rasterise them.
 Stage stage_for(CrabMood m) {
   if (m == CRAB_ROCKING) return Stage::Rock;
+  // Opus below high effort, and the dozing rocker: stage lit but not pulsing.
+  // The pulse is locked to the strum tempo, so it belongs to the hard-effort
+  // performance, not to every appearance of the guitar.
+  if (m == CRAB_ROCKING_CALM || m == CRAB_ROCKING_TIRED) return Stage::RockStill;
   if (m == CRAB_FABLE_FIGHT) return Stage::Fire;
+  // CRAB_FABLE_TIRED gets no fire: the dozing knight is not fighting anything.
   return Stage::None;
 }
 
@@ -362,14 +402,24 @@ void set_stage(Stage kind) {
   }
 
   lv_obj_remove_flag(stageBg, LV_OBJ_FLAG_HIDDEN);
-  // Only the rock stage has a grid; fire is a bare wash.
+  // Only the rock stages have a grid; fire is a bare wash.
+  const bool grid = (kind == Stage::Rock || kind == Stage::RockStill);
   for (lv_obj_t *l : gridLines) {
     if (l == nullptr) continue;
-    if (kind == Stage::Rock) {
+    if (grid) {
       lv_obj_remove_flag(l, LV_OBJ_FLAG_HIDDEN);
     } else {
       lv_obj_add_flag(l, LV_OBJ_FLAG_HIDDEN);
     }
+  }
+
+  if (kind == Stage::RockStill) {
+    // Lights on, performer asleep. No animation at all, so this costs nothing
+    // to leave up.
+    lv_obj_set_style_bg_color(stageBg, kStageBg, LV_PART_MAIN);
+    grid_opa_cb(stageBg, LV_OPA_30);
+    currentStage = kind;
+    return;
   }
 
   lv_anim_t a;

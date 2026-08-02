@@ -6,7 +6,7 @@ Bluetooth LE. A small Python script on your laptop reads your usage and pushes
 it to the device; a pixel crab reacts to how hard Claude is working and how much
 quota is left.
 
-![All ten crab moods animating](assets/crab-moods.gif)
+![All fourteen crab moods animating](assets/crab-moods.gif)
 
 Unofficial project. Not affiliated with, endorsed by, or supported by Anthropic.
 
@@ -30,7 +30,8 @@ Account & Usage panel shows, not an estimate derived from token counts.
 - **Arc gauge** around the rim, green → orange → red at 70% / 90%
 - **Live model and reasoning effort** (`opus-5 / xhigh`), which `ccusage` does
   not expose — read from Claude Code's transcripts
-- **A crab that reacts** to model, effort and remaining quota
+- **A crab that reacts** to model, effort, remaining quota and whether
+  Claude is actually doing anything
 - **Reconnects on its own** when the laptop sleeps or the device reboots
 - **Never blanks or shows zeros** when disconnected — it keeps the last reading
   and tells you how old it is
@@ -41,29 +42,44 @@ The mascot's expression is driven by what Claude is doing and how much session
 quota is left. Quota wins over everything else: a crab that looks alert while
 the session is spent would be actively misleading.
 
-| Mood | | When | Tell |
+Every model has its own pair, split at `high` effort:
+
+| Model | below `high` | | `high` and above | |
+|---|---|---|---|---|
+| **Fable** | `fable_calm` — in a full plumed helm, standing watch on a black field | <img src="assets/crab-fable_calm.gif" width="90"> | `fable_fight` — swinging a burning sword at a dragon, firelight pulsing in time with every strike | <img src="assets/crab-fable_fight.gif" width="90"> |
+| **Opus** | `rocking_calm` — same guitar, stage lit but not pulsing | <img src="assets/crab-rocking_calm.gif" width="90"> | `rocking` — strums on a purple stage, the grid flashing to the beat | <img src="assets/crab-rocking.gif" width="90"> |
+| **Sonnet** | `focused` — hard angled brows, narrow eyes, almost no movement | <img src="assets/crab-focused.gif" width="90"> | `working` — hunched behind a laptop, typing, and now and then tilting the mug back for a drink | <img src="assets/crab-working.gif" width="90"> |
+| **Haiku** | `chill` — raised brows, wide eyes glancing aside, easy sway | <img src="assets/crab-chill.gif" width="90"> | `happy` — eyes shut in `^^` arcs, wide grin, blushing, bouncy | <img src="assets/crab-happy.gif" width="90"> |
+
+Three states override the model:
+
+| | | When | Tell |
 |---|---|---|---|
-| **fable_fight** | <img src="assets/crab-fable_fight.gif" width="100"> | Fable, `high`/`xhigh` | helmed, swinging a burning sword at a dragon while firelight pulses in time with every strike |
-| **fable_calm** | <img src="assets/crab-fable_calm.gif" width="100"> | Fable, below `high` | in a full plumed helm, standing watch on a black field |
-| **rocking** | <img src="assets/crab-rocking.gif" width="100"> | `xhigh` effort | strums a guitar on a purple stage, echoing the Clawd that Claude Code itself shows at that level |
-| **working** | <img src="assets/crab-working.gif" width="100"> | `high` effort | hunched behind a laptop, typing, and every so often it stops to tilt the mug back for a drink |
-| **focused** | <img src="assets/crab-focused.gif" width="100"> | Opus | hard angled brows, narrow eyes, almost no movement |
-| **happy** | <img src="assets/crab-happy.gif" width="100"> | Haiku | eyes shut in `^^` arcs, wide grin, blushing, bouncy |
-| **chill** | <img src="assets/crab-chill.gif" width="100"> | everything else | raised brows, wide eyes glancing aside, easy sway |
-| **idle** | <img src="assets/crab-idle.gif" width="100"> | nothing written for 5 min | three dots lighting in turn overhead - Claude is waiting on you |
-| **sleepy** | <img src="assets/crab-sleepy.gif" width="100"> | session ≥ 85% | heavy lids, drooping brows, a drifting `z` |
-| **asleep** | <img src="assets/crab-asleep.gif" width="100"> | session ≥ 100% | tucked into bed under a blanket, snoozing `z`s |
+| **idle** | <img src="assets/crab-idle.gif" width="90"> | nothing written for 5 min | three dots lighting in turn overhead — Claude is waiting on you |
+| **tired** | <img src="assets/crab-working_tired.gif" width="90"> | session ≥ 85% | **stays in whatever set it was already in** and nods off there — see below |
+| **asleep** | <img src="assets/crab-asleep.gif" width="90"> | session ≥ 100% | tucked into bed under a blanket, snoozing `z`s |
 
-Every mood has exactly one trigger, resolved in this order:
+Resolved in this order: **quota → idle → model → effort**. Idle outranks model
+and effort because those describe the last thing that *ran*, not what is
+happening now.
 
-1. **Quota** — `asleep`, then `sleepy`. A spent session outranks everything;
-   a crab that looks alert while the quota is gone would be misleading.
-2. **Idle** — nothing written to a transcript for five minutes. This outranks
-   model and effort because those describe the last thing that *ran*, not what
-   is happening now.
-3. **Fable** — its own medieval set, split at `high` effort.
-4. **Effort** — `xhigh` → `rocking`, `high` → `working`.
-5. **Model** — Haiku → `happy`, Opus → `focused`, anything else → `chill`.
+### Nodding off in place
+
+Passing 85% does **not** cut to a generic sleepy animation. Each set has its
+own tired version, so the crab keeps its props and simply falls asleep where it
+is — swapping a crab at a desk for a bare crab on black read as a different
+character appearing.
+
+| | | |
+|---|---|---|
+| <img src="assets/crab-working_tired.gif" width="90"> | <img src="assets/crab-rocking_tired.gif" width="90"> | <img src="assets/crab-fable_tired.gif" width="90"> |
+| coffee gone cold, claws resting on the keys | guitar unstrummed, stage lights still on | shut behind the visor |
+
+Each is *cheaper* than the mood it replaces, not dearer — the busy motion is
+what costs. Moods with no set of their own (`focused`, `chill`, `happy`) fall
+back to the shared `sleepy`. 100% keeps the shared bed scene deliberately: the
+session is spent and the crab has stopped working, so leaving it slumped at its
+desk would say the opposite of what has happened.
 
 Each mood is separated by a *categorical* feature — brow angle, eye shape, a
 prop — rather than by size. An earlier version varied only eye height (10 / 7 /
