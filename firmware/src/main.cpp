@@ -68,6 +68,14 @@ void setup() {
 
   ble_server_init();
   Serial.println("[boot] ble_server_init() done, entering loop()");
+
+  // Runtime heap is the real memory budget, not the link-time RAM figure the
+  // build prints: NimBLE and LVGL both allocate heavily at runtime. Anything
+  // that needs a big buffer (e.g. a Lottie/canvas frame buffer at 4 bytes per
+  // pixel) has to fit in largest-free-block, not just total free.
+  Serial.printf("[mem] free heap: %u B, largest free block: %u B, min free ever: %u B\n",
+                (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap(),
+                (unsigned)ESP.getMinFreeHeap());
 }
 
 void loop() {
@@ -97,6 +105,16 @@ void loop() {
   }
 
   ui_set_connection(connState, age, haveState);
+
+  // Periodic heap report — catches slow leaks and shows the real headroom
+  // available once BLE is connected and LVGL has been rendering for a while.
+  static uint32_t lastHeapReport = 0;
+  if (millis() - lastHeapReport > 60000) {
+    lastHeapReport = millis();
+    Serial.printf("[mem] free heap: %u B, largest free block: %u B, min free ever: %u B\n",
+                  (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap(),
+                  (unsigned)ESP.getMinFreeHeap());
+  }
 
   lv_timer_handler();
   delay(5);
