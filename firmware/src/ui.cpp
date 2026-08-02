@@ -6,10 +6,7 @@
 #include <stdio.h>
 #include <string.h>
 
-extern "C" {
-extern const uint8_t lottie_mascot_asset[];
-extern const size_t lottie_mascot_asset_size;
-}
+#include "crab_assets.h"
 
 namespace {
 
@@ -27,6 +24,52 @@ lv_obj_t *mascot = nullptr;
 // heap to spare, where 120 gives ~14fps with only 26KB. CPU sits ~90% either
 // way (LVGL renders as fast as it can), so the extra size buys nothing.
 constexpr int32_t kMascotSide = 80;
+
+// Quota thresholds at which the crab starts winding down. Deliberately below
+// 100 for "sleepy" so it acts as a warning while there's still headroom left,
+// rather than only telling you once the session is already spent.
+constexpr uint8_t kSleepyPct = 85;
+constexpr uint8_t kAsleepPct = 100;
+
+CrabMood currentMood = CRAB_MOOD_COUNT;  // sentinel: nothing loaded yet
+
+bool contains(const char *hay, size_t hay_len, const char *needle) {
+  size_t n = strlen(needle);
+  if (n == 0 || n > hay_len) return false;
+  for (size_t i = 0; i + n <= hay_len && hay[i] != '\0'; i++) {
+    if (strncmp(hay + i, needle, n) == 0) return true;
+  }
+  return false;
+}
+
+// Session quota wins over everything: a crab that looks alert while the
+// session is exhausted would be actively misleading. Below that, the mood
+// reflects which model and effort level is doing the work.
+CrabMood mood_for(const UsageState &s) {
+  if (s.limits_ok) {
+    if (s.session_pct >= kAsleepPct) return CRAB_ASLEEP;
+    if (s.session_pct >= kSleepyPct) return CRAB_SLEEPY;
+  }
+  // "xhigh" must be tested before "high" — it contains it as a substring, so
+  // the looser check would swallow it and the guitar would never appear.
+  if (contains(s.effort, sizeof(s.effort), "xhigh")) return CRAB_ROCKING;
+  if (contains(s.effort, sizeof(s.effort), "high")) return CRAB_FOCUSED;
+  if (contains(s.model, sizeof(s.model), "haiku")) return CRAB_HAPPY;
+  if (contains(s.model, sizeof(s.model), "opus")) return CRAB_FOCUSED;
+  return CRAB_CHILL;
+}
+
+void apply_mood(CrabMood mood) {
+  if (mascot == nullptr || mood == currentMood || mood >= CRAB_MOOD_COUNT) return;
+  currentMood = mood;
+  const CrabAsset &a = crab_mood_assets[mood];
+  // Re-parsing the JSON is the deep-recursion path that needs the 32KB stack,
+  // so this must stay on state changes only — never per frame.
+  lv_lottie_set_src_data(mascot, a.data, a.size);
+  lv_anim_t *anim = lv_lottie_get_anim(mascot);
+  if (anim != nullptr) lv_anim_set_repeat_count(anim, LV_ANIM_REPEAT_INFINITE);
+  Serial.printf("[ui] crab mood -> %d\n", (int)mood);
+}
 
 View currentView = View::Session;
 
@@ -168,6 +211,7 @@ void render_view() {
   refresh_page_dots();
 
   bool onMascot = (currentView == View::Mascot);
+  if (haveCached) apply_mood(mood_for(cachedState));
   set_mascot_active(onMascot);
 
   // The mascot view is just the animation plus the arc, so the text rows would
@@ -336,11 +380,9 @@ void ui_init() {
                   (unsigned)mascotBytes, (unsigned)ESP.getMaxAllocHeap());
   } else {
     mascot = lv_lottie_create(scr);
-    lv_lottie_set_src_data(mascot, lottie_mascot_asset, lottie_mascot_asset_size);
     lv_lottie_set_buffer(mascot, kMascotSide, kMascotSide, mascotBuf);
     lv_obj_center(mascot);
-    lv_anim_t *a = lv_lottie_get_anim(mascot);
-    if (a != nullptr) lv_anim_set_repeat_count(a, LV_ANIM_REPEAT_INFINITE);
+    apply_mood(CRAB_CHILL);  // placeholder until the first UsageState arrives
     Serial.printf("[ui] mascot %dx%d ready (%u B), heap %u B\n", (int)kMascotSide, (int)kMascotSide,
                   (unsigned)mascotBytes, (unsigned)ESP.getFreeHeap());
   }
