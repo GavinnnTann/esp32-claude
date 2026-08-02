@@ -6,7 +6,7 @@
 
 enum class ConnState { Fresh, Stale, Disconnected };
 
-// Views cycled with the two navigation buttons. Session first — it's the one
+// Views cycled with the two navigation buttons. Session first - it's the one
 // that actually runs out during a working session.
 enum class View : uint8_t {
   Session = 0,

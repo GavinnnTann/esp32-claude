@@ -39,13 +39,13 @@ lv_anim_t *gridAnim = nullptr;
 const lv_color_t kStageBg = lv_color_hex(0x2E1851);
 const lv_color_t kStageGrid = lv_color_hex(0x9850E5);
 
-// 112x112 = 50,176 bytes of ARGB canvas. Sized up from 80 because the view
-// looked sparse once the stage filled the panel. This is close to the
-// practical ceiling: the buffer is allocated at init while the heap is still
-// mostly free, but after BLE connects and ThorVG loads the largest animation
-// there is only ~18KB of contiguous heap left. Check the [mem] line before
-// growing it further.
-constexpr int32_t kMascotSide = 112;
+// 104x104 = 43,264 bytes of ARGB canvas. Still ~30% larger than the original
+// 80px, but 112 proved too greedy: with the bed-scene animation loaded the
+// heap fell to 15.3KB free / 10.2KB largest block, which runs but leaves no
+// margin for a BLE reconnect on a device meant to sit on a desk for days.
+// The 8px difference is barely visible; the 7KB it returns is not.
+// Check the [mem] line before growing this.
+constexpr int32_t kMascotSide = 104;
 constexpr int32_t SCREEN_SIDE = 240;
 
 // Quota thresholds at which the crab starts winding down. Deliberately below
@@ -61,7 +61,7 @@ uint32_t nowUtc = 0;
 // The percentages come from a cache Claude Code refreshes on its own schedule,
 // so they can outlive the window they describe: if the cache was last fetched
 // before `reset` and that moment has now passed, the quota window has rolled
-// over and the cached figure is stale by definition — observed showing 75% for
+// over and the cached figure is stale by definition - observed showing 75% for
 // a session that had already reset 24 minutes earlier.
 //
 // Reporting "unknown" is the honest answer here. Silently showing 0% would be
@@ -91,7 +91,7 @@ CrabMood mood_for(const UsageState &s) {
     if (s.session_pct >= kAsleepPct) return CRAB_ASLEEP;
     if (s.session_pct >= kSleepyPct) return CRAB_SLEEPY;
   }
-  // "xhigh" must be tested before "high" — it contains it as a substring, so
+  // "xhigh" must be tested before "high" - it contains it as a substring, so
   // the looser check would swallow it and the guitar would never appear.
   if (contains(s.effort, sizeof(s.effort), "xhigh")) return CRAB_ROCKING;
   if (contains(s.effort, sizeof(s.effort), "high")) return CRAB_FOCUSED;
@@ -100,13 +100,19 @@ CrabMood mood_for(const UsageState &s) {
   return CRAB_CHILL;
 }
 
+#ifdef CRAB_MOOD_DEMO
+CrabMood demoMood() {
+  return (CrabMood)((millis() / 4000) % CRAB_MOOD_COUNT);
+}
+#endif
+
 void apply_mood(CrabMood mood) {
   if (mascotBuf == nullptr || mood == currentMood || mood >= CRAB_MOOD_COUNT) return;
 
   // The widget is DESTROYED AND REBUILT rather than re-pointed at new data.
   // ThorVG's Picture::load refuses to load into an already-loaded picture
   // (`if (paint || surface) return Result::InsufficientCondition;`), and
-  // lv_lottie_set_src_data ignores that return code — so calling it a second
+  // lv_lottie_set_src_data ignores that return code - so calling it a second
   // time silently keeps rendering the first animation. That looked exactly
   // like the mood logic being broken, when the mood was in fact correct.
   if (mascot != nullptr) lv_obj_delete(mascot);
@@ -121,7 +127,7 @@ void apply_mood(CrabMood mood) {
   // Source before buffer, matching LVGL's own example: set_buffer is what
   // sizes the picture and renders the first frame.
   // Re-parsing the JSON is the deep-recursion path that needs the 32KB stack,
-  // so this must stay on state changes only — never per frame.
+  // so this must stay on state changes only - never per frame.
   lv_lottie_set_src_data(mascot, a.data, a.size);
   lv_lottie_set_buffer(mascot, kMascotSide, kMascotSide, mascotBuf);
   lv_obj_center(mascot);
@@ -171,7 +177,7 @@ void format_age(uint32_t seconds, char *out, size_t out_len) {
 }
 
 // Singapore Standard Time is a fixed UTC+8 year-round (no DST), so this is
-// safe as plain integer math — no timezone database needed on the MCU.
+// safe as plain integer math - no timezone database needed on the MCU.
 void format_reset_sgt(uint32_t reset_utc, char *out, size_t out_len) {
   if (reset_utc == 0) {
     snprintf(out, out_len, "--");
@@ -266,7 +272,7 @@ void grid_opa_cb(void *var, int32_t v) {
 }
 
 // The stage only makes sense behind the guitar, and only on the mascot view.
-// Its pulse animation is deleted rather than left running when hidden —
+// Its pulse animation is deleted rather than left running when hidden -
 // otherwise it keeps dirtying full-width rects on views that don't show it.
 void set_stage_active(bool active) {
   if (stageBg == nullptr) return;
@@ -301,8 +307,8 @@ void set_stage_active(bool active) {
 }
 
 // ThorVG rasterises in software and pegs the CPU near 90% while animating, so
-// the mascot only runs on its own view. Hiding alone isn't enough — the LVGL
-// animation keeps ticking and re-rendering the canvas — so the animation is
+// the mascot only runs on its own view. Hiding alone isn't enough - the LVGL
+// animation keeps ticking and re-rendering the canvas - so the animation is
 // paused too, which is what actually returns the CPU.
 void set_mascot_active(bool active) {
   if (mascot == nullptr) return;
@@ -326,7 +332,14 @@ void render_view() {
   refresh_page_dots();
 
   bool onMascot = (currentView == View::Mascot);
+#ifdef CRAB_MOOD_DEMO
+  // Build with -D CRAB_MOOD_DEMO=1 to cycle every mood on a timer. Real quota
+  // states take hours to reach, so this is the only practical way to confirm
+  // each animation loads and renders within the heap budget.
+  if (haveCached) apply_mood(demoMood());
+#else
   if (haveCached) apply_mood(mood_for(cachedState));
+#endif
   set_mascot_active(onMascot);
   set_stage_active(onMascot && currentMood == CRAB_ROCKING);
 
@@ -395,7 +408,7 @@ void render_view() {
 
     case View::Details:
     default: {
-      // No percentage exists for "today" — it isn't a quota window — so this
+      // No percentage exists for "today" - it isn't a quota window - so this
       // view shows the raw token count and which model/effort is running.
       lv_arc_set_value(arc, 0);
       lv_obj_set_style_arc_color(arc, lv_palette_darken(LV_PALETTE_GREY, 2), LV_PART_INDICATOR);
@@ -537,7 +550,7 @@ void ui_init() {
   const size_t mascotBytes = (size_t)kMascotSide * kMascotSide * 4;
   mascotBuf = heap_caps_aligned_alloc(LV_DRAW_BUF_ALIGN, mascotBytes, MALLOC_CAP_8BIT);
   if (mascotBuf == nullptr) {
-    // Not fatal — the other three views are the useful ones. Skipping the
+    // Not fatal - the other three views are the useful ones. Skipping the
     // widget entirely leaves View::Mascot showing just the arc.
     Serial.printf("[ui] mascot disabled: could not allocate %u B (largest free block %u B)\n",
                   (unsigned)mascotBytes, (unsigned)ESP.getMaxAllocHeap());

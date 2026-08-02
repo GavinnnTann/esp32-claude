@@ -38,7 +38,7 @@ class ServerCallbacks : public NimBLEServerCallbacks {
   }
 
   void onMTUChange(uint16_t mtu, NimBLEConnInfo &info) override {
-    // handover.md #4: never assume the requested MTU was granted — verify it here.
+    // handover.md #4: never assume the requested MTU was granted - verify it here.
     Serial.printf("[BLE] MTU negotiated: %u (requested %u)\n", mtu, kPreferredMtu);
   }
 };
@@ -99,7 +99,7 @@ void ble_server_init() {
   NimBLEService *service = server->createService(SERVICE_UUID);
 
   // Read: lets nRF Connect (or similar) inspect the last value manually while bringing
-  // the board up (handover.md build order step 3). Write: the host pushes fresh data —
+  // the board up (handover.md build order step 3). Write: the host pushes fresh data -
   // NOT Notify, since nothing needs push updates *from* the device for this value.
   usageChar = service->createCharacteristic(USAGE_STATE_UUID, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE);
   usageChar->setCallbacks(&usageCallbacks);
