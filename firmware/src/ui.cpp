@@ -27,10 +27,23 @@ lv_obj_t *mascot = nullptr;
 // rebuilt each time (see apply_mood).
 void *mascotBuf = nullptr;
 
+// Full-panel stage for the rocking mood. Native LVGL rather than part of the
+// Lottie: a 240x240 Lottie canvas would need 230KB (4 bytes/px) against ~44KB
+// of free heap, and flat rects are far cheaper to fill than to rasterise
+// through ThorVG.
+constexpr int kGridLines = 4;  // per axis
+lv_obj_t *stageBg = nullptr;
+lv_obj_t *gridLines[kGridLines * 2] = {};
+lv_anim_t *gridAnim = nullptr;
+
+const lv_color_t kStageBg = lv_color_hex(0x2E1851);
+const lv_color_t kStageGrid = lv_color_hex(0x9850E5);
+
 // 80x80 rather than 120x120: measured on this board, 80 gives ~19fps with 59KB
 // heap to spare, where 120 gives ~14fps with only 26KB. CPU sits ~90% either
 // way (LVGL renders as fast as it can), so the extra size buys nothing.
 constexpr int32_t kMascotSide = 80;
+constexpr int32_t SCREEN_SIDE = 240;
 
 // Quota thresholds at which the crab starts winding down. Deliberately below
 // 100 for "sleepy" so it acts as a warning while there's still headroom left,
@@ -240,6 +253,50 @@ void set_tokens_row(uint32_t tokens, uint32_t cents) {
   lv_label_set_text(tokensLabel, buf);
 }
 
+// Grid opacity, driven by an LVGL animation so the pulse costs a style write
+// rather than a re-rasterise.
+void grid_opa_cb(void *var, int32_t v) {
+  (void)var;
+  for (lv_obj_t *l : gridLines) {
+    if (l != nullptr) lv_obj_set_style_bg_opa(l, (lv_opa_t)v, LV_PART_MAIN);
+  }
+}
+
+// The stage only makes sense behind the guitar, and only on the mascot view.
+// Its pulse animation is deleted rather than left running when hidden —
+// otherwise it keeps dirtying full-width rects on views that don't show it.
+void set_stage_active(bool active) {
+  if (stageBg == nullptr) return;
+  if (active) {
+    lv_obj_remove_flag(stageBg, LV_OBJ_FLAG_HIDDEN);
+    for (lv_obj_t *l : gridLines) {
+      if (l != nullptr) lv_obj_remove_flag(l, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (gridAnim == nullptr) {
+      lv_anim_t a;
+      lv_anim_init(&a);
+      lv_anim_set_var(&a, stageBg);
+      lv_anim_set_exec_cb(&a, grid_opa_cb);
+      lv_anim_set_values(&a, LV_OPA_20, LV_OPA_90);
+      // 250ms each way = one pulse per strum, matching the animation's four
+      // strums across its 2s loop.
+      lv_anim_set_duration(&a, 250);
+      lv_anim_set_reverse_duration(&a, 250);
+      lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
+      gridAnim = lv_anim_start(&a);
+    }
+  } else {
+    lv_obj_add_flag(stageBg, LV_OBJ_FLAG_HIDDEN);
+    for (lv_obj_t *l : gridLines) {
+      if (l != nullptr) lv_obj_add_flag(l, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (gridAnim != nullptr) {
+      lv_anim_delete(stageBg, grid_opa_cb);
+      gridAnim = nullptr;
+    }
+  }
+}
+
 // ThorVG rasterises in software and pegs the CPU near 90% while animating, so
 // the mascot only runs on its own view. Hiding alone isn't enough — the LVGL
 // animation keeps ticking and re-rendering the canvas — so the animation is
@@ -268,6 +325,7 @@ void render_view() {
   bool onMascot = (currentView == View::Mascot);
   if (haveCached) apply_mood(mood_for(cachedState));
   set_mascot_active(onMascot);
+  set_stage_active(onMascot && currentMood == CRAB_ROCKING);
 
   // The mascot view is just the animation plus the arc, so the text rows would
   // only clutter it.
@@ -369,6 +427,41 @@ void ui_init() {
 
   lv_obj_t *scr = lv_screen_active();
   lv_obj_set_style_bg_color(scr, lv_color_black(), LV_PART_MAIN);
+
+  // Stage first, so it sits at the bottom of the z-order. LVGL draws children
+  // in creation order, and the mascot gets recreated later still (apply_mood),
+  // which conveniently keeps it on top.
+  stageBg = lv_obj_create(scr);
+  lv_obj_remove_style_all(stageBg);
+  lv_obj_set_size(stageBg, SCREEN_SIDE, SCREEN_SIDE);
+  lv_obj_center(stageBg);
+  lv_obj_set_style_radius(stageBg, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(stageBg, kStageBg, LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(stageBg, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_remove_flag(stageBg, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_remove_flag(stageBg, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_flag(stageBg, LV_OBJ_FLAG_HIDDEN);
+
+  for (int i = 0; i < kGridLines; i++) {
+    int pos = (SCREEN_SIDE * (i + 1)) / (kGridLines + 1);
+    for (int axis = 0; axis < 2; axis++) {
+      lv_obj_t *l = lv_obj_create(scr);
+      lv_obj_remove_style_all(l);
+      if (axis == 0) {
+        lv_obj_set_size(l, 2, SCREEN_SIDE);
+        lv_obj_align(l, LV_ALIGN_TOP_LEFT, pos, 0);
+      } else {
+        lv_obj_set_size(l, SCREEN_SIDE, 2);
+        lv_obj_align(l, LV_ALIGN_TOP_LEFT, 0, pos);
+      }
+      lv_obj_set_style_bg_color(l, kStageGrid, LV_PART_MAIN);
+      lv_obj_set_style_bg_opa(l, LV_OPA_50, LV_PART_MAIN);
+      lv_obj_remove_flag(l, LV_OBJ_FLAG_SCROLLABLE);
+      lv_obj_remove_flag(l, LV_OBJ_FLAG_CLICKABLE);
+      lv_obj_add_flag(l, LV_OBJ_FLAG_HIDDEN);
+      gridLines[i * 2 + axis] = l;
+    }
+  }
 
   // Arc gauge around the rim. Rounded caps because flat caps on a thin
   // indicator read as a stray blocky tick at low percentages.
