@@ -84,6 +84,7 @@ def render(doc, frame, stage=False):
         rc = next(i for i in g["it"] if i["ty"] == "rc")
         fl = next(i for i in g["it"] if i["ty"] == "fl")
         tr = next(i for i in g["it"] if i["ty"] == "tr")
+        st = next((i for i in g["it"] if i["ty"] == "st"), None)
         p, anchor = val(tr["p"], frame), val(tr["a"], frame)
         r = val(tr["r"], frame)
         rot = math.radians(r[0] if isinstance(r, list) else r)
@@ -98,9 +99,21 @@ def render(doc, frame, stage=False):
         cx = p[0] + ox * math.cos(rot) - oy * math.sin(rot)
         cy = p[1] + ox * math.sin(rot) + oy * math.cos(rot)
         col = tuple(int(c * 255) for c in fl["c"]["k"][:3]) + (int(255 * op / 100),)
-        lay = Image.new("RGBA", (int(sz[0] * SCALE) + 2, int(sz[1] * SCALE) + 2), (0, 0, 0, 0))
+        # Stroke is drawn ON TOP of the fill, matching the order the generator
+        # emits and the heavy chibi outline it is going for. Approximate: PIL
+        # centres its outline on the edge, ThorVG does the same, but this is
+        # the one part of the preview that is not guaranteed pixel-faithful.
+        pad = int((val(st["w"], frame) if st else 0) * SCALE) + 2
+        lay = Image.new("RGBA", (int(sz[0] * SCALE) + pad, int(sz[1] * SCALE) + pad), (0, 0, 0, 0))
+        box = [pad // 2, pad // 2, sz[0] * SCALE + pad // 2, sz[1] * SCALE + pad // 2]
+        sw = None
+        if st is not None:
+            w = val(st["w"], frame)
+            w = w[0] if isinstance(w, list) else w
+            sw = (tuple(int(c * 255) for c in st["c"]["k"][:3]) + (255,), max(1, int(w * SCALE)))
         ImageDraw.Draw(lay).rounded_rectangle(
-            [1, 1, sz[0] * SCALE, sz[1] * SCALE], radius=max(1, rad * SCALE), fill=col)
+            box, radius=max(1, rad * SCALE), fill=col,
+            outline=sw[0] if sw else None, width=sw[1] if sw else 0)
         if abs(rot) > 1e-6:
             lay = lay.rotate(-math.degrees(rot), expand=True, resample=Image.BICUBIC)
         img.alpha_composite(lay, (int(cx * SCALE - lay.width / 2), int(cy * SCALE - lay.height / 2)))

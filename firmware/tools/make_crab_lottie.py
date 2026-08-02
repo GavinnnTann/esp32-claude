@@ -8,10 +8,17 @@ Written from scratch rather than sourced online: Anthropic's "Clawd" mascot is
 their IP with no free licence, and the community re-creations carry
 non-commercial terms. This is a generic crab, so there's nothing to attribute.
 
-Deliberately blocky — every shape is a rounded rect. ThorVG rasterises vector
-paths in software on this board and already sits near 90% CPU while animating,
-so shape count and path complexity are what matter. Curves and gradients would
-cost far more than they add at 80x80.
+Deliberately blocky — every shape is a rounded rect, filled, never stroked.
+ThorVG rasterises vector paths in software on this board and already sits near
+90% CPU while animating, so shape count and path complexity are what matter.
+Curves and gradients would cost far more than they add at 80x80.
+
+NO STROKES. Lottie strokes were tried for a heavy-outline art style and ThorVG
+has to build RLE spans for the stroke geometry: ten stroked shapes killed the
+device with `_horizLine: Asserted at expression: rle->spans != NULL (Out of
+memory)` (tvgSwRle.cpp:363) before it finished one mood cycle. Faking an
+outline with a larger rect behind each shape works but costs a whole group per
+shape, and overlapping fills are already the most expensive thing here.
 
 Moods are chosen by the firmware from model / effort / session quota; see
 CrabMood in src/crab_assets.h.
@@ -39,7 +46,8 @@ EYE_DARK = [0.106, 0.098, 0.094]
 # 112px round display focused/sleepy were indistinguishable and happy read as
 # neutral. Brows, eye shape and props do the work now; size alone does not.
 #
-#   eye      : "open" | "squint" | "narrow" | "happy" (^^ arcs) | "droop" | "closed"
+#   eye      : "open" | "wide" | "squint" | "narrow" | "happy" (^^ arcs)
+#              | "droop" | "closed"
 #   brow     : None | "angry" (inner ends down) | "furrow" (a mild angry)
 #              | "tired" (outer ends down) | "raised"
 #   pupil_dx : pupil offset, for looking off to one side
@@ -54,7 +62,7 @@ EYE_DARK = [0.106, 0.098, 0.094]
 #   blush    : cheek patches
 #   zzz      : floating sleep marks
 #   dots     : "waiting" dots above the head, lighting in sequence
-#   armour   : helmet, nose guard, plume and breastplate (Fable)
+#   knight   : chibi-knight build - the helm REPLACES the head (Fable)
 #   dragon   : sword + dragon, for the Fable fight
 MOODS: dict[str, dict] = {
     # Eyes shut in happy arcs + big grin + blush + a lively bounce. Nothing
@@ -91,14 +99,14 @@ MOODS: dict[str, dict] = {
     # the helmet rim sits exactly where brows would be, so drawing both put two
     # overlapping fills in the same place for no visible gain, and overlapping
     # fills are the expensive kind here.
-    "fable_calm":  dict(eye="open",   brow=None,   pupil_dx=0, mouth="flat",  wave=8, bob=0,
-                        speed=1.3, armour=True),
+    "fable_calm":  dict(eye="wide",   brow=None,   pupil_dx=0, mouth="smile", wave=9, bob=0,
+                        speed=1.3, knight=True),
     # Fable, high/xhigh: sword drawn, swinging at a dragon. The red fire stage
     # behind it lives in ui.cpp so it can fill the panel; its pulse is locked to
     # FABLE_STRIKES. The dragon itself is deliberately static - the sword and
     # the stage carry the motion, and keyframes are what cost heap.
-    "fable_fight": dict(eye="narrow", brow=None,   pupil_dx=0, mouth="open",  wave=0, bob=0,
-                        speed=0.8, armour=True, dragon=True),
+    "fable_fight": dict(eye="wide",   brow=None,   pupil_dx=0, mouth="open",  wave=0, bob=0,
+                        speed=0.8, knight=True, dragon=True),
     # Heads-down at a desk: laptop open, claws typing, coffee steaming. The
     # crab is raised (body_dy) so the desk and laptop occupy the lower third.
     # Hunched down behind the screen: body_dy is low enough that the laptop lid
@@ -148,8 +156,13 @@ GUITAR_TILT = 75
 STEEL = [0.769, 0.804, 0.847]
 STEEL_DARK = [0.478, 0.525, 0.596]
 STEEL_SHADE = [0.196, 0.227, 0.286]
+# Every knight shape carries this outline. Not pure black - a very dark warm
+# brown sits better against both the steel and the orange claws.
+OUTLINE = [0.129, 0.094, 0.086]
+VISOR = [0.106, 0.086, 0.082]
 PLUME = [0.780, 0.220, 0.239]
-BLADE = [0.898, 0.925, 0.949]
+BLADE = [0.988, 0.867, 0.541]
+FLAME = [0.902, 0.412, 0.153]
 DRAGON = [0.176, 0.353, 0.259]
 DRAGON_DARK = [0.106, 0.239, 0.176]
 DRAGON_EYE = [0.980, 0.749, 0.204]
@@ -285,21 +298,23 @@ def build(mood: str) -> dict:
         # the device on the desk scene. Compare "chill", which adds raised brows
         # (no overlap) for almost nothing. Avoid overlapping fills on any mood
         # that also carries a prop scene.
-        eye_h = {"open": 11, "squint": 7, "narrow": 6, "droop": 9}[eye]
-        pupil_w = 7 if eye == "squint" else 5
+        eye_h = {"open": 11, "squint": 7, "narrow": 6, "droop": 9, "wide": 14}[eye]
+        pupil_w = {"squint": 7, "wide": 7}.get(eye, 5)
+        pupil_h = 7 if eye == "wide" else min(5, eye_h - 1)
+        eye_w = 14 if eye == "wide" else 11
         pdx = m["pupil_dx"]
         # Droop keeps a full-height eye but covers the top half with a lid, so
         # you read "eyelid", not "small eye". It can afford the overlap because
         # it has no prop scene competing for heap.
         pupil_y = 43 if eye == "droop" else 41
         for dx in (-10, 10):
-            face.append(group(f"pupil{dx}", [rect(pupil_w, min(5, eye_h - 1), 2), fill(EYE_DARK)],
+            face.append(group(f"pupil{dx}", [rect(pupil_w, pupil_h, 3), fill(EYE_DARK)],
                               (cx + dx + pdx, pupil_y - dy)))
         if eye == "droop":
             for dx in (-10, 10):
                 face.append(group(f"droop{dx}", [rect(12, 5, 2), fill(SHELL)], (cx + dx, 38 - dy)))
         for dx in (-10, 10):
-            face.append(group(f"eye{dx}", [rect(11, eye_h, 4), fill(EYE_WHITE)], (cx + dx, 41 - dy)))
+            face.append(group(f"eye{dx}", [rect(eye_w, eye_h, 5), fill(EYE_WHITE)], (cx + dx, 41 - dy)))
 
     # Brows carry more expression than eye size does, especially at this size.
     #
@@ -380,9 +395,8 @@ def build(mood: str) -> dict:
         limbs = [
             # Sword: blade and crossguard share the claw as their pivot, so they
             # swing as one piece. Same rigid-body rule as the coffee mug.
-            group("blade", [rect(4, 30, 1, offset=(0, -17)), fill(BLADE)], (sx, sy),
-                  swing_sword),
-            group("guard", [rect(13, 4, 1, offset=(0, -3)), fill(STEEL_DARK)], (sx, sy),
+            group("blade", [rect(7, 31, 3, offset=(0, -18)), fill(FLAME)], (sx, sy), swing_sword),
+            group("guard", [rect(14, 5, 2, offset=(0, -3)), fill(STEEL_DARK)], (sx, sy),
                   swing_sword),
             group("claw_sword", [rect(11, 9, 4), fill(SHELL_DARK)], (sx, sy), swing_sword),
         ]
@@ -399,6 +413,46 @@ def build(mood: str) -> dict:
     # Medieval kit. Helmet and breastplate necessarily overlap the shell, so
     # this is kept to four rects and no brows - overlapping fills are what
     # ThorVG charges most for.
+    # Chibi-knight build. This REPLACES the head rather than layering plates
+    # over it: in the reference art the helmet IS the head, with a single dark
+    # visor slit for a face and no features underneath. That is both truer to
+    # the style and cheaper - it drops the eyes, pupils, mouth, nasal and cheek
+    # plates entirely, which is five overlapping groups gone.
+    #
+    # Proportions are deliberately top-heavy: an oversized helm, stubby legs,
+    # and the crab's own claws left orange at the sides so it still reads as
+    # this project's crab wearing a helm rather than a different character.
+    knight = []
+    if m.get("knight"):
+        # FULL helm - the helmet is the head, not a plate worn over it. An
+        # open-faced version was tried and lost the silhouette that makes this
+        # read as a knight at 96px through a round bezel.
+        #
+        # The visor is NOT a plain dark slit. On its own it was exactly that: a
+        # black rectangle with nothing in it. The slit now frames a strip of the
+        # crab's own orange with two eyes on it, so the character still shows
+        # through the armour - which is the whole point of it being Clawd in a
+        # helm rather than a generic knight.
+        sway = anim([(q[0], [-7]), (q[1], [7]), (q[2], [-7]), (q[3], [7]), (q[4], [-7])])
+        rivets = [
+            group(f"rivet{i}", [rect(4, 4, 2), fill(STEEL_SHADE)], (cx - 15 + i * 10, 21))
+            for i in range(4)
+        ]
+        eye_dx = 9
+        knight = [
+            *[group(f"kpupil{d}", [rect(5, 6, 2), fill(EYE_DARK)], (cx + d, 40))
+              for d in (-eye_dx, eye_dx)],
+            *[group(f"keye{d}", [rect(10, 8, 4), fill(EYE_WHITE)], (cx + d, 40))
+              for d in (-eye_dx, eye_dx)],
+            group("kface", [rect(32, 10, 3), fill(SHELL)], (cx, 40)),
+            group("visor", [rect(37, 14, 4), fill(VISOR)], (cx, 40)),
+            *rivets,
+            group("plume", [rect(9, 14, 4, offset=(0, -6)), fill(PLUME)], (cx, 16), sway),
+            group("helm", [rect(50, 44, 13), fill(STEEL)], (cx, 35)),
+            group("boot_l", [rect(13, 11, 5), fill(STEEL_DARK)], (cx - 11, 60)),
+            group("boot_r", [rect(13, 11, 5), fill(STEEL_DARK)], (cx + 11, 60)),
+        ]
+
     armour = []
     if m.get("armour"):
         # A first version was a flat slab across the forehead plus a wide plate
@@ -427,9 +481,9 @@ def build(mood: str) -> dict:
     dragon = []
     if m.get("dragon"):
         dragon = [
-            group("dreye", [rect(4, 4, 2), fill(DRAGON_EYE)], (67, 22)),
-            group("drsnout", [rect(15, 8, 3), fill(DRAGON_DARK)], (55, 28)),
-            group("drhead", [rect(24, 18, 7), fill(DRAGON)], (68, 24)),
+            group("dreye", [rect(7, 7, 4), fill(DRAGON_EYE)], (65, 13)),
+            group("drsnout", [rect(16, 9, 4), fill(DRAGON_DARK)], (52, 22)),
+            group("drhead", [rect(26, 20, 9), fill(DRAGON)], (65, 16)),
         ]
 
     # NOTE: the purple stage and its pulsing grid are NOT drawn here. They live
@@ -579,12 +633,12 @@ def build(mood: str) -> dict:
     # algorithm. This list therefore runs front to back. A held guitar belongs
     # in front of the shell; bare claws tuck behind it. The blanket covers the
     # body but not the face; the pillow sits behind everything but the base.
-    if m.get("dragon"):
-        # Armour over the face, sword in front of everything, dragon behind the
-        # crab so the blade reads as swinging INTO it rather than past it.
-        shapes = [*limbs, *armour, *mouths, *face, shell, *legs, *dragon]
-    elif m.get("armour"):
-        shapes = [*armour, *mouths, *face, shell, *limbs, *legs]
+    if m.get("knight") and m.get("dragon"):
+        # Sword frontmost, then the dragon leaning in, then the helm over the
+        # crab's own head.
+        shapes = [*limbs, *dragon, *knight]
+    elif m.get("knight"):
+        shapes = [*knight, *limbs]
     elif m.get("guitar"):
         shapes = [*zzz, *dots, *mouths, *face, *limbs, shell, *legs]
     elif m.get("bed"):

@@ -43,8 +43,8 @@ the session is spent would be actively misleading.
 
 | Mood | | When | Tell |
 |---|---|---|---|
-| **fable_fight** | <img src="assets/crab-fable_fight.gif" width="100"> | Fable, `high`/`xhigh` | armoured, swinging a sword at a dragon while firelight pulses in time with every strike |
-| **fable_calm** | <img src="assets/crab-fable_calm.gif" width="100"> | Fable, below `high` | helmed and plumed, standing watch on a black field |
+| **fable_fight** | <img src="assets/crab-fable_fight.gif" width="100"> | Fable, `high`/`xhigh` | helmed, swinging a burning sword at a dragon while firelight pulses in time with every strike |
+| **fable_calm** | <img src="assets/crab-fable_calm.gif" width="100"> | Fable, below `high` | in a full plumed helm, standing watch on a black field |
 | **rocking** | <img src="assets/crab-rocking.gif" width="100"> | `xhigh` effort | strums a guitar on a purple stage, echoing the Clawd that Claude Code itself shows at that level |
 | **working** | <img src="assets/crab-working.gif" width="100"> | `high` effort | hunched behind a laptop, typing, and every so often it stops to tilt the mug back for a drink |
 | **focused** | <img src="assets/crab-focused.gif" width="100"> | Opus | hard angled brows, narrow eyes, almost no movement |
