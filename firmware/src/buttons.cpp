@@ -7,7 +7,7 @@ namespace {
 // Board's two navigation buttons. Neither collides with the display, which
 // uses 12/14/15/5/27/33/32 plus 21 for touch (see lib/TFT_eSPI_Setup/User_Setup.h).
 constexpr uint8_t PIN_UP = 4;
-constexpr uint8_t PIN_DOWN = 18;
+constexpr uint8_t PIN_DOWN = 19;
 
 // Same debounce window FobBob settled on. Buttons are wired to GND and read
 // through the internal pull-up, so pressed == LOW.
@@ -55,8 +55,25 @@ void buttons_init() {
 }
 
 ButtonEvent buttons_tick() {
-  bool upEdge = update(upState, read_pressed(PIN_UP));
-  bool downEdge = update(downState, read_pressed(PIN_DOWN));
+  bool upRaw = read_pressed(PIN_UP);
+  bool downRaw = read_pressed(PIN_DOWN);
+
+  // Bring-up aid: log every raw level change, before debouncing. If a press
+  // shows up here but produces no view change, the problem is debounce/logic;
+  // if nothing shows up at all, the pin or wiring polarity is wrong.
+  static bool prevUpRaw = false;
+  static bool prevDownRaw = false;
+  if (upRaw != prevUpRaw) {
+    prevUpRaw = upRaw;
+    Serial.printf("[btn] raw GPIO%u -> %s\n", (unsigned)PIN_UP, upRaw ? "PRESSED" : "released");
+  }
+  if (downRaw != prevDownRaw) {
+    prevDownRaw = downRaw;
+    Serial.printf("[btn] raw GPIO%u -> %s\n", (unsigned)PIN_DOWN, downRaw ? "PRESSED" : "released");
+  }
+
+  bool upEdge = update(upState, upRaw);
+  bool downEdge = update(downState, downRaw);
 
   // No auto-repeat: there are only a couple of views to cycle, so a held button
   // racing through them would be more annoying than useful.
