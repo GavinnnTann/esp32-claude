@@ -132,11 +132,14 @@ void ui_init() {
   modelLabel = add_row(col, "-- / --");
   lv_obj_set_style_text_color(modelLabel, lv_palette_main(LV_PALETTE_BLUE), LV_PART_MAIN);
 
+  // The two real quota figures, straight from Claude Code's own cache — these
+  // are the headline numbers, so they sit directly under the model line.
+  pctLabel = add_row(col, "sess --%  week --%");
+
   dayLabel = add_row(col, "day --");
   weekLabel = add_row(col, "week --");
   blockLabel = add_row(col, "block --");
 
-  pctLabel = add_row(col, "block 0%");
   resetLabel = add_row(col, "");
   lv_obj_set_style_text_color(resetLabel, lv_palette_lighten(LV_PALETTE_GREY, 1), LV_PART_MAIN);
 
@@ -152,9 +155,13 @@ void ui_init() {
 }
 
 void ui_set_usage(const UsageState &state) {
-  uint8_t pct = state.block_pct > 100 ? 100 : state.block_pct;
-  lv_arc_set_value(arc, pct);
-  lv_obj_set_style_arc_color(arc, arc_color_for_pct(pct), LV_PART_INDICATOR);
+  // The arc tracks the real "Session (5hr)" figure — the same number Claude
+  // Code's own Account & Usage panel shows, not a token-ratio estimate.
+  uint8_t pct = state.session_pct > 100 ? 100 : state.session_pct;
+  lv_arc_set_value(arc, state.limits_ok ? pct : 0);
+  lv_obj_set_style_arc_color(arc, state.limits_ok ? arc_color_for_pct(pct)
+                                                  : lv_palette_darken(LV_PALETTE_GREY, 1),
+                             LV_PART_INDICATOR);
 
   char model[sizeof(state.model) + 1];
   char effort[sizeof(state.effort) + 1];
@@ -164,16 +171,23 @@ void ui_set_usage(const UsageState &state) {
   snprintf(modelBuf, sizeof(modelBuf), "%s / %s", model[0] ? model : "?", effort[0] ? effort : "?");
   lv_label_set_text(modelLabel, modelBuf);
 
+  char pctBuf[32];
+  if (state.limits_ok) {
+    snprintf(pctBuf, sizeof(pctBuf), "sess %u%%  week %u%%", (unsigned)pct, (unsigned)state.week_pct);
+  } else {
+    snprintf(pctBuf, sizeof(pctBuf), "quota unavailable");
+  }
+  lv_label_set_text(pctLabel, pctBuf);
+  lv_obj_set_style_text_color(pctLabel, state.limits_ok ? arc_color_for_pct(pct)
+                                                        : lv_palette_lighten(LV_PALETTE_GREY, 1),
+                              LV_PART_MAIN);
+
   set_usage_row(dayLabel, "day", state.day_tokens, state.day_cents);
   set_usage_row(weekLabel, "week", state.week_tokens, state.week_cents);
   set_usage_row(blockLabel, "block", state.block_tokens, state.block_cents);
 
-  char pctBuf[24];
-  snprintf(pctBuf, sizeof(pctBuf), "block %u%%", (unsigned)pct);
-  lv_label_set_text(pctLabel, pctBuf);
-
   char resetBuf[24];
-  format_reset_sgt(state.block_reset, resetBuf, sizeof(resetBuf));
+  format_reset_sgt(state.session_reset, resetBuf, sizeof(resetBuf));
   lv_label_set_text(resetLabel, resetBuf);
 }
 

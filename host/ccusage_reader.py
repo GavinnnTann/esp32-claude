@@ -19,9 +19,9 @@ from __future__ import annotations
 import json
 import subprocess
 from datetime import datetime, timezone
-from typing import Optional
 
 from transcript_reader import read_current_model_effort
+from usage_limits import read_usage_limits
 from usage_state import VERSION, UsageState
 
 
@@ -43,11 +43,6 @@ def _run_ccusage(subcommand: str) -> dict:
         raise CcusageError(f"`{cmd}` did not return valid JSON: {e}") from e
 
 
-def _parse_iso(ts: str) -> int:
-    # ccusage timestamps look like "2026-08-01T20:00:00.000Z".
-    return int(datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp())
-
-
 def _sum_four(entry: dict, keys: tuple[str, str, str, str]) -> int:
     return sum(entry.get(k, 0) for k in keys)
 
@@ -55,12 +50,15 @@ def _sum_four(entry: dict, keys: tuple[str, str, str, str]) -> int:
 _FLAT_TOKEN_KEYS = ("inputTokens", "outputTokens", "cacheCreationTokens", "cacheReadTokens")
 
 
-def read_usage_state(block_token_ceiling: Optional[int]) -> UsageState:
-    """Build the current UsageState from `ccusage daily`, `weekly`, and `blocks`.
+def read_usage_state() -> UsageState:
+    """Build the current UsageState from ccusage plus two non-ccusage sources.
 
-    `block_token_ceiling` is the user-calibrated token count that represents
-    100% of a 5-hour block (see docs/handover.md section 4, "block_pct needs
-    calibration"). Pass None until it's been calibrated; block_pct will read 0.
+    Token/cost totals come from `ccusage daily`, `weekly`, and `blocks`. The
+    quota *percentages* do not: they're read from Claude Code's own cache via
+    `usage_limits.py`, because they're weighted (long contexts cost more even
+    when cached) and can't be derived from raw token counts. Model and effort
+    come from `transcript_reader.py` for the same "ccusage doesn't have it"
+    reason.
     """
     daily = _run_ccusage("daily")
     weekly = _run_ccusage("weekly")
@@ -98,21 +96,19 @@ def read_usage_state(block_token_ceiling: Optional[int]) -> UsageState:
             counts, ("inputTokens", "outputTokens", "cacheCreationInputTokens", "cacheReadInputTokens")
         )
         block_cents = round(active_block.get("costUSD", 0.0) * 100)
-        block_reset = _parse_iso(active_block["endTime"])
     else:
         # Outside any 5-hour session window right now — also not an error.
         block_tokens = 0
         block_cents = 0
-        block_reset = 0
-
-    if block_token_ceiling:
-        block_pct = min(100, round(block_tokens / block_token_ceiling * 100))
-    else:
-        block_pct = 0
 
     # Not from ccusage — it drops `effort` entirely during aggregation, so
     # these come straight from Claude Code's transcripts.
     model, effort = read_current_model_effort()
+
+    # Also not from ccusage: the real quota percentages and reset instants.
+    # Note these reset times are the actual quota boundaries, which differ
+    # from ccusage's rolling 5-hour block `endTime` (seen 12:00 vs 12:20 SGT).
+    limits = read_usage_limits()
 
     return UsageState(
         version=VERSION,
@@ -125,6 +121,10 @@ def read_usage_state(block_token_ceiling: Optional[int]) -> UsageState:
         week_cents=week_cents,
         block_tokens=block_tokens,
         block_cents=block_cents,
-        block_reset=block_reset,
-        block_pct=block_pct,
+        session_reset=limits.session_reset,
+        week_reset=limits.week_reset,
+        limits_fetched=limits.fetched_at,
+        session_pct=limits.session_pct,
+        week_pct=limits.week_pct,
+        limits_ok=1 if limits.ok else 0,
     )

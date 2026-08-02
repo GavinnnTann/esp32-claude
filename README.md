@@ -17,11 +17,10 @@ targets).
 
 ## Status
 
-Flashed and verified end-to-end on real hardware: boots, advertises over
-BLE, host connects at full requested MTU (64 bytes), time syncs, and pushes
-real ccusage data successfully (see `docs/BUILD_PROGRESS.md` for the full
-log). **Not yet confirmed:** what the round display actually looks like —
-needs a human looking at the physical screen.
+Working end-to-end on real hardware: boots, advertises over BLE, host
+connects at the full requested MTU of 247, time syncs, and pushes live data
+whose percentages match Claude Code's own Account & Usage panel exactly
+(see `docs/BUILD_PROGRESS.md` for the full log).
 
 Currently a **verbose all-fields layout** — every field on one screen, no
 summarising, pending a proper UI once the board's two navigation buttons are
@@ -29,17 +28,17 @@ wired up (their GPIOs aren't known yet):
 
 ```
       opus-5 / xhigh
-   day   117.9M  $26.19
-   week  639.6M  $49.81
-   block  52.3M  $10.81
-   block 0%
-   resets 12:00 SGT
+   sess 35%  week 11%
+   day   141.0M  $26.19
+   week  662.7M  $49.81
+   block  75.9M  $10.81
+   resets 12:20 SGT
    updated 2m ago    [dot]
 ```
 
-Plus an arc gauge around the rim tracking `block_pct`, colored green /
-orange / red at 70% / 90% thresholds like Claude.ai's usage bar. The dot is
-green/yellow/red for fresh/stale/disconnected.
+Plus an arc gauge around the rim tracking the real session percentage,
+colored green / orange / red at 70% / 90% thresholds like Claude.ai's usage
+bar. The dot is green/yellow/red for fresh/stale/disconnected.
 
 ## Firmware (`firmware/`)
 
@@ -57,7 +56,7 @@ Advertises as `esp32-claude` with one GATT service exposing two characteristics:
 
 | Characteristic | Properties | Payload |
 |---|---|---|
-| Usage State | Read, Write | `UsageState` struct (58 bytes, version 3) |
+| Usage State | Read, Write | `UsageState` struct (68 bytes, version 4) |
 | Time Sync | Write | `uint32_t` epoch seconds |
 
 **Deviation from the original spec:** `docs/handover.md` lists Usage State as
@@ -90,17 +89,27 @@ Pinned against `ccusage 20.0.19` — schemas have already drifted once between
 versions during this project (see `host/ccusage_reader.py` docstring); re-verify
 with `jq 'keys'` on live output before bumping it.
 
-### Calibrating `block_pct`
+### Quota percentages
 
-ccusage reports tokens used in the current 5-hour block but not your plan's
-limit — nothing exposes that. `block_pct` reads 0 until you calibrate it:
+The session and weekly percentages are the **real** figures — the same ones
+Claude Code's own Account & Usage panel shows. They're read from
+`~/.claude.json`'s `cachedUsageUtilization`, which Claude Code refreshes from
+the server.
 
-1. Run the host script and use Claude Code normally until you actually hit a
-   rate limit.
-2. Note the `block_tokens` value the script printed right before that happened.
-3. Set `BLOCK_TOKEN_CEILING` in `host/config.py` to that number.
+No calibration required. An earlier version of this project tried to estimate
+them against a hand-tuned token ceiling (per `docs/handover.md` section 4,
+which assumed the plan limit wasn't exposed) — that's obsolete. It also
+wouldn't have worked well: the percentages are weighted, since longer contexts
+cost more even when cached, so they aren't a linear function of token counts.
 
-Until then the arc gauge stays empty rather than showing a made-up percentage.
+Two caveats:
+
+- It's a **cache**, refreshed only while Claude Code is running. If Claude
+  Code has been closed for a while the percentages freeze; `limits_fetched`
+  is sent to the device so this can be surfaced.
+- ccusage's rolling 5-hour block boundary is **not** the quota reset (seen
+  12:00 vs the real 12:20 SGT). The display uses the real `resets_at`.
+
 `*_cents` fields are what those tokens would cost at API rates, not money
 actually spent on a subscription — label any UI accordingly.
 

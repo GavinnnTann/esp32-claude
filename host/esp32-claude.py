@@ -20,12 +20,14 @@ sys.stdout.reconfigure(line_buffering=True)
 
 
 def get_state():
-    return read_usage_state(config.BLOCK_TOKEN_CEILING)
+    return read_usage_state()
 
 
 def main() -> None:
-    if config.BLOCK_TOKEN_CEILING is None:
-        print("[config] BLOCK_TOKEN_CEILING is not set — block_pct will always read 0. See host/config.py.")
+    state = read_usage_state()
+    if not state.limits_ok:
+        print("[config] Could not read cachedUsageUtilization from ~/.claude.json — "
+              "quota percentages will read 0. Is Claude Code installed/signed in?")
     asyncio.run(ble_client.run_forever(config.POLL_INTERVAL_S, get_state))
 
 

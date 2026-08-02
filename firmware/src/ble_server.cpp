@@ -5,7 +5,11 @@
 
 namespace {
 
-constexpr uint16_t kPreferredMtu = 64;
+// UsageState outgrew the old 64-byte MTU (payload = MTU - 3) once the real
+// quota percentages were added. 247 is the common BLE 4.2+ ceiling most
+// stacks grant; the negotiated value is printed in onMTUChange because
+// docs/handover.md #4 is right that it must never be assumed.
+constexpr uint16_t kPreferredMtu = 247;
 
 NimBLEServer *server = nullptr;
 NimBLECharacteristic *usageChar = nullptr;

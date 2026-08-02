@@ -13,16 +13,17 @@ from typing import Callable
 
 from bleak import BleakClient, BleakScanner
 
-from usage_state import TIME_SYNC_UUID, USAGE_STATE_UUID, UsageState
+from usage_state import STRUCT_SIZE, TIME_SYNC_UUID, USAGE_STATE_UUID, UsageState
 
 DEVICE_NAME = "esp32-claude"
 SCAN_TIMEOUT_S = 10.0
 RECONNECT_DELAY_S = 5.0
 
-# 26-byte UsageState needs at least this many ATT payload bytes (26 + 3 header) in
-# one packet. Below this, delivery relies on the stack's automatic queued/long
-# writes — see docs/handover.md section 4.
-MIN_MTU_FOR_SINGLE_PACKET = 29
+# UsageState needs STRUCT_SIZE + 3 bytes of ATT header to land in one packet.
+# Derived rather than hardcoded so it tracks the struct automatically — this
+# was 29 when the struct was 26 bytes and would have silently gone stale.
+# Below this, delivery relies on the stack's queued/long writes (handover.md #4).
+MIN_MTU_FOR_SINGLE_PACKET = STRUCT_SIZE + 3
 
 
 async def _sync_time(client: BleakClient) -> None:
