@@ -2,15 +2,17 @@
 
 #include <stdint.h>
 
+#include "usage_state.h"
+
 enum class ConnState { Fresh, Stale, Disconnected };
 
 void ui_init();
 
-// Update the arc gauge (block_pct), centre numeral (day_tokens), the weekly
-// total caption, and the block-reset time (shown in Singapore time, UTC+8 —
-// SG has no DST so a fixed offset is safe). `block_reset_utc` is the raw
-// UTC epoch seconds from UsageState; 0 means "no active block right now".
-void ui_set_usage(uint32_t day_tokens, uint32_t week_tokens, uint8_t block_pct, uint32_t block_reset_utc);
+// Push a whole UsageState to the display. Verbose mode: every field gets its
+// own row rather than being summarised, so nothing is hidden while the layout
+// is still being decided (button-driven screen navigation comes later, once
+// the board's two button GPIOs are known).
+void ui_set_usage(const UsageState &state);
 
 // Update the connection dot and age caption. `haveData` is false until the
 // first UsageState has ever been received (distinct from "stale").

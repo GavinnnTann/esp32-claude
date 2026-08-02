@@ -23,11 +23,23 @@ real ccusage data successfully (see `docs/BUILD_PROGRESS.md` for the full
 log). **Not yet confirmed:** what the round display actually looks like —
 needs a human looking at the physical screen.
 
-Shows, on the round display: an arc gauge around the rim for `block_pct`,
-today's token count as the big centre numeral, this week's token total as a
-small caption above it, the current block's reset time in Singapore time
-(fixed UTC+8, no DST) below the numeral, and a connection-status dot
-(green/yellow/red for fresh/stale/disconnected) with an age caption.
+Currently a **verbose all-fields layout** — every field on one screen, no
+summarising, pending a proper UI once the board's two navigation buttons are
+wired up (their GPIOs aren't known yet):
+
+```
+      opus-5 / xhigh
+   day   117.9M  $26.19
+   week  639.6M  $49.81
+   block  52.3M  $10.81
+   block 0%
+   resets 12:00 SGT
+   updated 2m ago    [dot]
+```
+
+Plus an arc gauge around the rim tracking `block_pct`, colored green /
+orange / red at 70% / 90% thresholds like Claude.ai's usage bar. The dot is
+green/yellow/red for fresh/stale/disconnected.
 
 ## Firmware (`firmware/`)
 
@@ -45,7 +57,7 @@ Advertises as `esp32-claude` with one GATT service exposing two characteristics:
 
 | Characteristic | Properties | Payload |
 |---|---|---|
-| Usage State | Read, Write | `UsageState` struct (34 bytes, version 2) |
+| Usage State | Read, Write | `UsageState` struct (58 bytes, version 3) |
 | Time Sync | Write | `uint32_t` epoch seconds |
 
 **Deviation from the original spec:** `docs/handover.md` lists Usage State as
@@ -67,6 +79,12 @@ Reads `ccusage daily`, `ccusage weekly`, and `ccusage blocks` (all
 `UsageState` struct the firmware expects, and pushes it over BLE. Reconnects
 automatically if the device or the laptop's Bluetooth radio drops (lid
 close/sleep is normal, not an error).
+
+The current model and reasoning effort come from a second source: ccusage
+exposes model names but **drops the `effort` field during aggregation**, so
+`host/transcript_reader.py` reads both directly from Claude Code's own
+transcripts (`~/.claude/projects/**/*.jsonl`). Only the `effort` and
+`message.model` fields are read — never conversation content.
 
 Pinned against `ccusage 20.0.19` — schemas have already drifted once between
 versions during this project (see `host/ccusage_reader.py` docstring); re-verify

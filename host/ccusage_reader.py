@@ -21,6 +21,7 @@ import subprocess
 from datetime import datetime, timezone
 from typing import Optional
 
+from transcript_reader import read_current_model_effort
 from usage_state import VERSION, UsageState
 
 
@@ -109,9 +110,15 @@ def read_usage_state(block_token_ceiling: Optional[int]) -> UsageState:
     else:
         block_pct = 0
 
+    # Not from ccusage — it drops `effort` entirely during aggregation, so
+    # these come straight from Claude Code's transcripts.
+    model, effort = read_current_model_effort()
+
     return UsageState(
         version=VERSION,
         ts=int(datetime.now(timezone.utc).timestamp()),
+        model=model,
+        effort=effort,
         day_tokens=day_tokens,
         day_cents=day_cents,
         week_tokens=week_tokens,
