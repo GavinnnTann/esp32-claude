@@ -3,6 +3,7 @@
 #include <lvgl.h>
 
 #include "ble_server.h"
+#include "buttons.h"
 #include "ui.h"
 #include "usage_state.h"
 
@@ -66,6 +67,8 @@ void setup() {
   ui_init();
   Serial.println("[boot] ui_init() done");
 
+  buttons_init();
+
   ble_server_init();
   Serial.println("[boot] ble_server_init() done, entering loop()");
 
@@ -79,6 +82,19 @@ void setup() {
 }
 
 void loop() {
+  switch (buttons_tick()) {
+    case ButtonEvent::Up:
+      ui_prev_view();
+      Serial.printf("[btn] up -> view %d\n", (int)ui_current_view());
+      break;
+    case ButtonEvent::Down:
+      ui_next_view();
+      Serial.printf("[btn] down -> view %d\n", (int)ui_current_view());
+      break;
+    case ButtonEvent::None:
+      break;
+  }
+
   UsageState incoming;
   if (ble_server_take_new_state(incoming)) {
     lastState = incoming;
@@ -104,7 +120,19 @@ void loop() {
     connState = ConnState::Stale;
   }
 
-  ui_set_connection(connState, age, haveState);
+  // Only touch the labels when something visibly changed. Rewriting them every
+  // ~5ms marks them dirty every iteration, forcing LVGL to re-render the text
+  // (and anything overlapping it) continuously — pure waste. Age is compared
+  // directly because the caption only ever shows whole seconds/minutes/hours.
+  static ConnState lastConnState = ConnState::Disconnected;
+  static uint32_t lastShownAge = UINT32_MAX;
+  static bool lastHaveState = false;
+  if (connState != lastConnState || age != lastShownAge || haveState != lastHaveState) {
+    lastConnState = connState;
+    lastShownAge = age;
+    lastHaveState = haveState;
+    ui_set_connection(connState, age, haveState);
+  }
 
   // Periodic heap report — catches slow leaks and shows the real headroom
   // available once BLE is connected and LVGL has been rendering for a while.
