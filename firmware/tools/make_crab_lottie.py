@@ -53,6 +53,9 @@ EYE_DARK = [0.106, 0.098, 0.094]
 #   sip      : desk scene only - lift the mug to the face once per loop
 #   blush    : cheek patches
 #   zzz      : floating sleep marks
+#   dots     : "waiting" dots above the head, lighting in sequence
+#   armour   : helmet, nose guard, plume and breastplate (Fable)
+#   dragon   : sword + dragon, for the Fable fight
 MOODS: dict[str, dict] = {
     # Eyes shut in happy arcs + big grin + blush + a lively bounce. Nothing
     # else uses arc eyes, so this is unmistakable at a glance.
@@ -76,6 +79,26 @@ MOODS: dict[str, dict] = {
     # Code itself shows at that level. One claw pins the neck, the other strums.
     "rocking": dict(eye="narrow", brow="angry", pupil_dx=0, mouth="open",  wave=0,  bob=2,
                     speed=0.8, guitar=True),
+    # Waiting on you. Three dots lighting in sequence above the head - the same
+    # staggered-opacity trick as the zzz marks, which is the cheapest kind of
+    # animation this generator has. The dots are what make it categorical:
+    # without them this is chill's face, and chill is the mood it would
+    # otherwise be confused with. Gaze is straight ahead (pupil_dx=0) where
+    # chill glances aside.
+    "idle":    dict(eye="open",   brow="raised", pupil_dx=0, mouth="smile", wave=7,  bob=2,
+                    speed=1.6, dots=3),
+    # Fable, low/medium effort: armoured and idling. Deliberately brow=None -
+    # the helmet rim sits exactly where brows would be, so drawing both put two
+    # overlapping fills in the same place for no visible gain, and overlapping
+    # fills are the expensive kind here.
+    "fable_calm":  dict(eye="open",   brow=None,   pupil_dx=0, mouth="flat",  wave=8, bob=2,
+                        speed=1.3, armour=True),
+    # Fable, high/xhigh: sword drawn, swinging at a dragon. The red fire stage
+    # behind it lives in ui.cpp so it can fill the panel; its pulse is locked to
+    # FABLE_STRIKES. The dragon itself is deliberately static - the sword and
+    # the stage carry the motion, and keyframes are what cost heap.
+    "fable_fight": dict(eye="narrow", brow=None,   pupil_dx=0, mouth="open",  wave=0, bob=1,
+                        speed=0.8, armour=True, dragon=True),
     # Heads-down at a desk: laptop open, claws typing, coffee steaming. The
     # crab is raised (body_dy) so the desk and laptop occupy the lower third.
     # Hunched down behind the screen: body_dy is low enough that the laptop lid
@@ -119,6 +142,23 @@ GUITAR_NECK = [0.949, 0.898, 0.780]
 # steeper, more natural-looking angle the neck runs straight through the right
 # eye, and the eyes are what carry the expression.
 GUITAR_TILT = 75
+
+# Fable's medieval kit. Steel is a cold grey-blue so it separates from the
+# orange shell, the same complement logic that drove the guitar's teal.
+STEEL = [0.667, 0.706, 0.761]
+STEEL_DARK = [0.435, 0.478, 0.545]
+PLUME = [0.780, 0.220, 0.239]
+BLADE = [0.898, 0.925, 0.949]
+DRAGON = [0.176, 0.353, 0.259]
+DRAGON_DARK = [0.106, 0.239, 0.176]
+DRAGON_EYE = [0.980, 0.749, 0.204]
+
+# Sword strikes per loop. The fire stage in ui.cpp pulses once per strike, so
+# this number and kFirePulseMs there are two halves of one decision - the brief
+# was that the pulse tempo matches the sword hitting the dragon. Change one and
+# you must change the other. Four strikes over the 2s loop = 500ms per strike =
+# 250ms each way, which is exactly what the rocking stage already uses.
+FABLE_STRIKES = 4
 
 
 def rgb(c):
@@ -326,6 +366,27 @@ def build(mood: str) -> dict:
             group("gbody", [rect(19, 16, 7), fill(GUITAR_BODY)],
                   (gx, gy), static(GUITAR_TILT)),
         ]
+    elif m.get("dragon"):
+        # One strike per FABLE_STRIKES of the loop. The blade is hinged at the
+        # claw and swings down and to the right, into the dragon.
+        step = dur / FABLE_STRIKES
+        pts = []
+        for i in range(FABLE_STRIKES):
+            pts += [(step * i, [-12]), (step * (i + 0.45), [52])]
+        pts.append((dur, [-12]))
+        swing_sword = anim(pts)
+        sx, sy = cx + 17, 49 - dy
+        limbs = [
+            # Sword: blade and crossguard share the claw as their pivot, so they
+            # swing as one piece. Same rigid-body rule as the coffee mug.
+            group("blade", [rect(4, 30, 1, offset=(0, -17)), fill(BLADE)], (sx, sy),
+                  swing_sword),
+            group("guard", [rect(13, 4, 1, offset=(0, -3)), fill(STEEL_DARK)], (sx, sy),
+                  swing_sword),
+            group("claw_sword", [rect(11, 9, 4), fill(SHELL_DARK)], (sx, sy), swing_sword),
+            group("claw_off", [rect(14, 12, 5, offset=(-7, 0)), fill(SHELL_DARK)],
+                  (cx - 18, 46 - dy)),
+        ]
     else:
         # Asleep tucks the claws down against the body instead of holding them out.
         claw_y = 50 if m["wave"] == 0 else 44
@@ -336,6 +397,29 @@ def build(mood: str) -> dict:
                   (cx + 18, claw_y - dy), None if m["wave"] == 0 else swing(-1)),
         ]
 
+    # Medieval kit. Helmet and breastplate necessarily overlap the shell, so
+    # this is kept to four rects and no brows - overlapping fills are what
+    # ThorVG charges most for.
+    armour = []
+    if m.get("armour"):
+        armour = [
+            group("plume", [rect(5, 11, 2), fill(PLUME)], (cx, 19 - dy)),
+            group("noseguard", [rect(5, 11, 2), fill(STEEL_DARK)], (cx, 38 - dy)),
+            group("helmet", [rect(46, 13, 5), fill(STEEL)], (cx, 31 - dy)),
+            group("breastplate", [rect(26, 13, 4), fill(STEEL_DARK)], (cx, 53 - dy)),
+        ]
+
+    # The dragon looms in from the upper right, where the sword swings. Static
+    # by design; the blade and the fire stage carry the motion.
+    dragon = []
+    if m.get("dragon"):
+        dragon = [
+            group("dreye", [rect(4, 4, 2), fill(DRAGON_EYE)], (67, 22)),
+            group("drhorn", [rect(3, 10, 1), fill(DRAGON_DARK)], (72, 11), static(24)),
+            group("drsnout", [rect(15, 8, 3), fill(DRAGON_DARK)], (55, 28)),
+            group("drhead", [rect(24, 18, 7), fill(DRAGON)], (68, 24)),
+        ]
+
     # NOTE: the purple stage and its pulsing grid are NOT drawn here. They live
     # in ui.cpp as plain LVGL objects so they can fill the whole 240x240 panel —
     # a Lottie canvas that size would need 230KB (4 bytes/px) against ~44KB of
@@ -343,6 +427,19 @@ def build(mood: str) -> dict:
     # rasterise them, and keeps this animation's shape count down.
 
     zzz = zzz_groups(m["zzz"], dur) if m.get("zzz") else []
+
+    # Waiting dots. Same staggered opacity as zzz_groups but round and in a row
+    # above the head, so it reads as "thinking of you" rather than "asleep".
+    dots = []
+    for i in range(m.get("dots", 0)):
+        slot = dur / max(1, m["dots"])
+        t_on = i * slot
+        pts = [(0, [25])] if t_on > 0 else []
+        pts += [(t_on, [25]), (t_on + slot * 0.35, [100]), (t_on + slot * 0.9, [25])]
+        if pts[-1][0] < dur:
+            pts.append((dur, [25]))
+        dots.append(group(f"dot{i}", [rect(6, 6, 3), fill(ZZZ_COLOR, anim(pts))],
+                          (cx - 10 + i * 10, 16 - dy)))
 
     # Desk scene: laptop lid in front of the raised body, claws tapping on the
     # base, a steaming mug beside it.
@@ -470,8 +567,14 @@ def build(mood: str) -> dict:
     # algorithm. This list therefore runs front to back. A held guitar belongs
     # in front of the shell; bare claws tuck behind it. The blanket covers the
     # body but not the face; the pillow sits behind everything but the base.
-    if m.get("guitar"):
-        shapes = [*zzz, *mouths, *face, *limbs, shell, *legs]
+    if m.get("dragon"):
+        # Armour over the face, sword in front of everything, dragon behind the
+        # crab so the blade reads as swinging INTO it rather than past it.
+        shapes = [*limbs, *armour, *mouths, *face, shell, *legs, *dragon]
+    elif m.get("armour"):
+        shapes = [*armour, *mouths, *face, shell, *limbs, *legs]
+    elif m.get("guitar"):
+        shapes = [*zzz, *dots, *mouths, *face, *limbs, shell, *legs]
     elif m.get("bed"):
         shapes = [*zzz, *mouths, *face, *bed_front, shell, *limbs, *legs, *bed_back]
     elif m.get("desk"):
@@ -481,7 +584,7 @@ def build(mood: str) -> dict:
         # laptop as a stray bar.
         shapes = [*face, *desk_front, *mouths, shell, *legs, *desk_back]
     else:
-        shapes = [*zzz, *mouths, *face, shell, *limbs, *legs]
+        shapes = [*zzz, *dots, *mouths, *face, shell, *limbs, *legs]
 
     # Face and shell bob together - animating only the shell would leave the
     # face hanging. Selected by identity rather than by slice index, since the

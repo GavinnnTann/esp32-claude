@@ -24,14 +24,19 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-MOODS = ["happy", "focused", "chill", "working", "sleepy", "asleep", "rocking"]
+MOODS = ["happy", "focused", "chill", "working", "idle",
+         "fable_calm", "fable_fight", "sleepy", "asleep", "rocking"]
 SCALE = 3
 # The combined grid is rendered at full SCALE then downsampled, so it stays
 # crisp while keeping the GIF small enough to sit at the top of a README.
 GRID_SCALE = 2
 GRID_FRAMES = 40
 GRID_FPS = 20
+STAGE_MOODS = {"rocking", "fable_fight"}
 STAGE_BG = (46, 24, 81, 255)
+# Fable fights on a dark field lit by fire; rocking plays on a purple stage.
+FIRE_BG = (18, 5, 4, 255)
+FIRE_GLOW = (140, 38, 26)
 STAGE_GRID = (152, 80, 229)
 
 
@@ -56,14 +61,24 @@ def render(doc, frame, stage=False):
     if stage:
         # Mirrors the native LVGL stage drawn in ui.cpp, so the README shows
         # what the device shows rather than a bare animation on black.
-        img.paste(Image.new("RGBA", img.size, STAGE_BG), (0, 0))
-        dr = ImageDraw.Draw(img, "RGBA")
-        pulse = 0.9 if (frame % 15) < 7 else 0.25
-        a = int(255 * pulse)
-        for i in range(4):
-            p = int(w * SCALE * (i + 1) / 5)
-            dr.rectangle([p, 0, p + 2 * SCALE, h * SCALE], fill=STAGE_GRID + (a,))
-            dr.rectangle([0, p, w * SCALE, p + 2 * SCALE], fill=STAGE_GRID + (a,))
+        if stage == "fire":
+            # One pulse per sword strike - four across the loop, matching
+            # FABLE_STRIKES in make_crab_lottie.py and kFirePulseMs in ui.cpp.
+            # Interpolate the background colour rather than overlaying a
+            # translucent wash, which blew the whole frame out to near-white.
+            phase = (frame % 15) / 15.0
+            u = 1.0 - abs(phase * 2 - 1)
+            bg = tuple(int(a + (b - a) * u) for a, b in zip(FIRE_BG[:3], FIRE_GLOW)) + (255,)
+            img.paste(Image.new("RGBA", img.size, bg), (0, 0))
+        else:
+            img.paste(Image.new("RGBA", img.size, STAGE_BG), (0, 0))
+            dr = ImageDraw.Draw(img, "RGBA")
+            pulse = 0.9 if (frame % 15) < 7 else 0.25
+            a = int(255 * pulse)
+            for i in range(4):
+                p = int(w * SCALE * (i + 1) / 5)
+                dr.rectangle([p, 0, p + 2 * SCALE, h * SCALE], fill=STAGE_GRID + (a,))
+                dr.rectangle([0, p, w * SCALE, p + 2 * SCALE], fill=STAGE_GRID + (a,))
 
     for g in reversed(doc["layers"][0]["shapes"]):
         rc = next(i for i in g["it"] if i["ty"] == "rc")
@@ -103,7 +118,7 @@ def main(argv):
 
     # Per-mood animated GIFs.
     for m, doc in docs.items():
-        stage = m == "rocking"
+        stage = "fire" if m == "fable_fight" else (m in STAGE_MOODS)
         step = 2
         frames = [render(doc, f, stage).convert("P", palette=Image.ADAPTIVE)
                   for f in range(0, doc["op"], step)]
@@ -118,7 +133,7 @@ def main(argv):
     w = docs["happy"]["w"] * SCALE
     sheet = Image.new("RGBA", (w * len(MOODS), w), (10, 10, 10, 255))
     for i, m in enumerate(MOODS):
-        sheet.paste(render(docs[m], 4, m == "rocking"), (i * w, 0))
+        sheet.paste(render(docs[m], 4, "fire" if m == "fable_fight" else (m in STAGE_MOODS)), (i * w, 0))
     sheet.save(out / "crab-moods.png")
     print("  crab-moods.png")
 
@@ -140,7 +155,7 @@ def main(argv):
         dr = ImageDraw.Draw(img)
         for j, m in enumerate(MOODS):
             doc = docs[m]
-            frame = render(doc, u * doc["op"], m == "rocking")
+            frame = render(doc, u * doc["op"], "fire" if m == "fable_fight" else (m in STAGE_MOODS))
             x, y = (j % cols) * cell, (j // cols) * (cell + pad)
             img.paste(frame.resize((cell, cell), Image.NEAREST), (x, y))
             dr.text((x + 4, y + cell + 3), m, fill=(200, 200, 200, 255))

@@ -38,6 +38,17 @@ lv_anim_t *gridAnim = nullptr;
 
 const lv_color_t kStageBg = lv_color_hex(0x2E1851);
 const lv_color_t kStageGrid = lv_color_hex(0x9850E5);
+// Fable's firelight. Deliberately dim at the trough and only a soft red at the
+// peak - a saturated red behind an orange crab swallows the crab.
+const lv_color_t kFireDim = lv_color_hex(0x120504);
+const lv_color_t kFireGlow = lv_color_hex(0x8C261A);
+
+// One pulse per hit, each way. Shared by both stages because both animations
+// beat four times per loop; see FABLE_STRIKES in tools/make_crab_lottie.py.
+constexpr uint32_t kStagePulseMs = 250;
+
+enum class Stage : uint8_t { None, Rock, Fire };
+Stage currentStage = Stage::None;
 
 // 96x96 = 36,864 bytes, and it must be ARGB8888 - lv_lottie_set_buffer hands
 // the pointer straight to tvg_swcanvas_set_target as ARGB8888, so there is no
@@ -61,6 +72,13 @@ constexpr int32_t SCREEN_SIDE = 240;
 // rather than only telling you once the session is already spent.
 constexpr uint8_t kSleepyPct = 85;
 constexpr uint8_t kAsleepPct = 100;
+
+// How long since Claude Code last wrote to a transcript before the crab counts
+// as waiting on you. Deliberately generous: a single long-running tool call (a
+// build, a test suite) writes NOTHING for its whole duration, so a short
+// threshold would call an active session idle. Five minutes is long enough
+// that it only fires when you have actually stepped away.
+constexpr uint32_t kIdleAfterS = 5 * 60;
 
 CrabMood currentMood = CRAB_MOOD_COUNT;  // sentinel: nothing loaded yet
 
@@ -99,14 +117,32 @@ CrabMood mood_for(const UsageState &s) {
     if (s.session_pct >= kAsleepPct) return CRAB_ASLEEP;
     if (s.session_pct >= kSleepyPct) return CRAB_SLEEPY;
   }
-  // "xhigh" must be tested before "high" - it contains it as a substring, so
-  // the looser check would swallow it and the guitar would never appear.
+  // Nothing written to a transcript in a while: Claude is waiting on you, and
+  // showing it mid-grind would be wrong. This outranks model and effort
+  // because those describe the last thing that RAN, not what is happening now.
+  // Guarded on both clocks being known, and on now being after the activity -
+  // an unsynced clock or a skewed host must not park the crab on idle.
+  if (nowUtc != 0 && s.last_activity != 0 && nowUtc > s.last_activity &&
+      nowUtc - s.last_activity >= kIdleAfterS) {
+    return CRAB_IDLE;
+  }
+
+  // "high" also matches "xhigh" as a substring. That is deliberate here: Fable
+  // fights across high AND xhigh, so one test covers both.
+  const bool hard = contains(s.effort, sizeof(s.effort), "high");
+  if (contains(s.model, sizeof(s.model), "fable")) {
+    return hard ? CRAB_FABLE_FIGHT : CRAB_FABLE_CALM;
+  }
+
+  // Below here the substring overlap is a hazard, not a help: "xhigh" must be
+  // tested before the looser check or it would be swallowed and the guitar
+  // would never appear.
   if (contains(s.effort, sizeof(s.effort), "xhigh")) return CRAB_ROCKING;
   // Effort drives the desk scene, model drives the face. Reasoning effort is
   // the better match for "heads-down at a laptop": it is the setting that
   // actually means grinding, and it changes with the work rather than with
   // whatever model happens to be selected.
-  if (contains(s.effort, sizeof(s.effort), "high")) return CRAB_WORKING;
+  if (hard) return CRAB_WORKING;
   if (contains(s.model, sizeof(s.model), "haiku")) return CRAB_HAPPY;
   if (contains(s.model, sizeof(s.model), "opus")) return CRAB_FOCUSED;
   return CRAB_CHILL;
@@ -287,39 +323,76 @@ void grid_opa_cb(void *var, int32_t v) {
   }
 }
 
-// The stage only makes sense behind the guitar, and only on the mascot view.
-// Its pulse animation is deleted rather than left running when hidden -
+// Fable fights by firelight: the whole panel washes between near-black and a
+// soft red. Colour is mixed here rather than animated as a style property
+// because LVGL animates an int, not a colour.
+void fire_mix_cb(void *var, int32_t v) {
+  lv_obj_set_style_bg_color((lv_obj_t *)var, lv_color_mix(kFireGlow, kFireDim, (uint8_t)v),
+                            LV_PART_MAIN);
+}
+
+// Backdrops that fill the whole panel. They live here as plain LVGL objects
+// rather than inside the Lottie because a 240x240 canvas would need 230KB
+// against ~46KB of free heap - and drawing them natively is far cheaper than
+// making ThorVG rasterise them.
+Stage stage_for(CrabMood m) {
+  if (m == CRAB_ROCKING) return Stage::Rock;
+  if (m == CRAB_FABLE_FIGHT) return Stage::Fire;
+  return Stage::None;
+}
+
+// The pulse animation is deleted rather than left running when hidden -
 // otherwise it keeps dirtying full-width rects on views that don't show it.
-void set_stage_active(bool active) {
-  if (stageBg == nullptr) return;
-  if (active) {
-    lv_obj_remove_flag(stageBg, LV_OBJ_FLAG_HIDDEN);
-    for (lv_obj_t *l : gridLines) {
-      if (l != nullptr) lv_obj_remove_flag(l, LV_OBJ_FLAG_HIDDEN);
-    }
-    if (gridAnim == nullptr) {
-      lv_anim_t a;
-      lv_anim_init(&a);
-      lv_anim_set_var(&a, stageBg);
-      lv_anim_set_exec_cb(&a, grid_opa_cb);
-      lv_anim_set_values(&a, LV_OPA_20, LV_OPA_90);
-      // 250ms each way = one pulse per strum, matching the animation's four
-      // strums across its 2s loop.
-      lv_anim_set_duration(&a, 250);
-      lv_anim_set_reverse_duration(&a, 250);
-      lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
-      gridAnim = lv_anim_start(&a);
-    }
-  } else {
+void set_stage(Stage kind) {
+  if (stageBg == nullptr || kind == currentStage) return;
+
+  // Always tear the old one down first; the two stages drive different
+  // callbacks and leaving both attached would fight over the same object.
+  lv_anim_delete(stageBg, grid_opa_cb);
+  lv_anim_delete(stageBg, fire_mix_cb);
+  gridAnim = nullptr;
+
+  if (kind == Stage::None) {
     lv_obj_add_flag(stageBg, LV_OBJ_FLAG_HIDDEN);
     for (lv_obj_t *l : gridLines) {
       if (l != nullptr) lv_obj_add_flag(l, LV_OBJ_FLAG_HIDDEN);
     }
-    if (gridAnim != nullptr) {
-      lv_anim_delete(stageBg, grid_opa_cb);
-      gridAnim = nullptr;
+    currentStage = kind;
+    return;
+  }
+
+  lv_obj_remove_flag(stageBg, LV_OBJ_FLAG_HIDDEN);
+  // Only the rock stage has a grid; fire is a bare wash.
+  for (lv_obj_t *l : gridLines) {
+    if (l == nullptr) continue;
+    if (kind == Stage::Rock) {
+      lv_obj_remove_flag(l, LV_OBJ_FLAG_HIDDEN);
+    } else {
+      lv_obj_add_flag(l, LV_OBJ_FLAG_HIDDEN);
     }
   }
+
+  lv_anim_t a;
+  lv_anim_init(&a);
+  lv_anim_set_var(&a, stageBg);
+  lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
+  // Both stages beat at the same tempo, and both are locked to their
+  // animation: four strums per loop for the guitar, FABLE_STRIKES swings per
+  // loop for the sword (see make_crab_lottie.py - change one, change the
+  // other). 250ms each way is one pulse per hit across a 2s loop.
+  lv_anim_set_duration(&a, kStagePulseMs);
+  lv_anim_set_reverse_duration(&a, kStagePulseMs);
+  if (kind == Stage::Rock) {
+    lv_obj_set_style_bg_color(stageBg, kStageBg, LV_PART_MAIN);
+    lv_anim_set_exec_cb(&a, grid_opa_cb);
+    lv_anim_set_values(&a, LV_OPA_20, LV_OPA_90);
+    gridAnim = lv_anim_start(&a);
+  } else {
+    lv_anim_set_exec_cb(&a, fire_mix_cb);
+    lv_anim_set_values(&a, 0, 255);
+    lv_anim_start(&a);
+  }
+  currentStage = kind;
 }
 
 // ThorVG rasterises in software and pegs the CPU near 90% while animating, so
@@ -368,10 +441,11 @@ void render_view() {
   // outgoing stage's full-screen background and eight grid bars alive across it
   // cost ~9KB at exactly the wrong moment - enough that the arc's
   // anti-aliasing mask then failed to allocate.
-  if (target != CRAB_ROCKING || !onMascot) set_stage_active(false);
+  const Stage wantStage = onMascot ? stage_for(target) : Stage::None;
+  if (wantStage != currentStage) set_stage(Stage::None);
   if (wantMood) apply_mood(target);
   set_mascot_active(onMascot);
-  set_stage_active(onMascot && currentMood == CRAB_ROCKING);
+  set_stage(onMascot ? stage_for(currentMood) : Stage::None);
 
   // The mascot view is just the animation plus the arc, so the text rows would
   // only clutter it.

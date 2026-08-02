@@ -6,7 +6,7 @@ Bluetooth LE. A small Python script on your laptop reads your usage and pushes
 it to the device; a pixel crab reacts to how hard Claude is working and how much
 quota is left.
 
-![All seven crab moods animating](assets/crab-moods.gif)
+![All ten crab moods animating](assets/crab-moods.gif)
 
 Unofficial project. Not affiliated with, endorsed by, or supported by Anthropic.
 
@@ -43,17 +43,27 @@ the session is spent would be actively misleading.
 
 | Mood | | When | Tell |
 |---|---|---|---|
+| **fable_fight** | <img src="assets/crab-fable_fight.gif" width="100"> | Fable, `high`/`xhigh` | armoured, swinging a sword at a dragon while firelight pulses in time with every strike |
+| **fable_calm** | <img src="assets/crab-fable_calm.gif" width="100"> | Fable, below `high` | helmed and plumed, standing watch on a black field |
 | **rocking** | <img src="assets/crab-rocking.gif" width="100"> | `xhigh` effort | strums a guitar on a purple stage, echoing the Clawd that Claude Code itself shows at that level |
 | **working** | <img src="assets/crab-working.gif" width="100"> | `high` effort | hunched behind a laptop, typing, and every so often it stops to tilt the mug back for a drink |
 | **focused** | <img src="assets/crab-focused.gif" width="100"> | Opus | hard angled brows, narrow eyes, almost no movement |
 | **happy** | <img src="assets/crab-happy.gif" width="100"> | Haiku | eyes shut in `^^` arcs, wide grin, blushing, bouncy |
 | **chill** | <img src="assets/crab-chill.gif" width="100"> | everything else | raised brows, wide eyes glancing aside, easy sway |
+| **idle** | <img src="assets/crab-idle.gif" width="100"> | nothing written for 5 min | three dots lighting in turn overhead - Claude is waiting on you |
 | **sleepy** | <img src="assets/crab-sleepy.gif" width="100"> | session ≥ 85% | heavy lids, drooping brows, a drifting `z` |
 | **asleep** | <img src="assets/crab-asleep.gif" width="100"> | session ≥ 100% | tucked into bed under a blanket, snoozing `z`s |
 
-Every mood has exactly one trigger. Effort drives the desk scene and model drives
-the face: reasoning effort is what actually means grinding, and it changes with
-the work rather than with whichever model happens to be selected.
+Every mood has exactly one trigger, resolved in this order:
+
+1. **Quota** — `asleep`, then `sleepy`. A spent session outranks everything;
+   a crab that looks alert while the quota is gone would be misleading.
+2. **Idle** — nothing written to a transcript for five minutes. This outranks
+   model and effort because those describe the last thing that *ran*, not what
+   is happening now.
+3. **Fable** — its own medieval set, split at `high` effort.
+4. **Effort** — `xhigh` → `rocking`, `high` → `working`.
+5. **Model** — Haiku → `happy`, Opus → `focused`, anything else → `chill`.
 
 Each mood is separated by a *categorical* feature — brow angle, eye shape, a
 prop — rather than by size. An earlier version varied only eye height (10 / 7 /
@@ -115,11 +125,11 @@ ccusage ──┐
 ~/.claude.json ──┘                                       ↑
   (real quota %)                                    GPIO4 / GPIO19
 ~/.claude/projects/*.jsonl                            (navigation)
-  (model + effort)
+  (model + effort, and mtime = idle clock)
 ```
 
 The device is the BLE **peripheral**; the laptop is the central and pushes a
-68-byte packed struct (`UsageState`) every time something visible changes, plus
+72-byte packed struct (`UsageState`) every time something visible changes, plus
 a heartbeat. Time is synced on every connect, so the display can age its own
 data and detect when a quota window has rolled over.
 
@@ -129,10 +139,11 @@ Three data sources, because no single one has everything:
 |---|---|
 | `ccusage daily` / `weekly` / `blocks` | token and cost totals |
 | `~/.claude.json` (`cachedUsageUtilization`) | the real quota %, and reset times |
-| `~/.claude/projects/**/*.jsonl` | current model and reasoning effort |
+| `~/.claude/projects/**/*.jsonl` | current model and reasoning effort; its **mtime** is the idle clock |
 
 Only the `effort` and `message.model` fields are read from transcripts — never
-conversation content.
+conversation content. Idle detection needs no reading at all: the file's
+modification time already is the moment of the last activity.
 
 ## Notes for anyone building something similar
 

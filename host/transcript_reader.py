@@ -36,6 +36,31 @@ def _shorten_model(model: str) -> str:
     return name[:15]
 
 
+def read_last_activity() -> int:
+    """Epoch UTC of the last thing Claude Code wrote. 0 if unknown.
+
+    Deliberately the transcript's MTIME, not a parsed timestamp. Claude Code
+    appends to the transcript on every message and tool result, so the file's
+    mtime already is the moment of the last activity - and taking it this way
+    means not opening the file at all, which keeps the "never read conversation
+    content" line exactly where it is. Parsing entries for a timestamp would
+    have meant reading more of the transcript for information the filesystem
+    was already handing us.
+
+    The firmware decides what counts as idle; this just reports the instant.
+    Sending the instant rather than an age also keeps a stale packet honest -
+    the age keeps growing on the device instead of freezing at whatever it was
+    when the host last managed to send.
+    """
+    try:
+        files = glob.glob(TRANSCRIPT_GLOB, recursive=True)
+        if not files:
+            return 0
+        return int(max(os.path.getmtime(f) for f in files))
+    except OSError:
+        return 0
+
+
 def read_current_model_effort() -> tuple[str, str]:
     """Returns (model, effort) from the most recently modified transcript.
 
