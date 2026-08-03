@@ -34,9 +34,8 @@ SCALE = 3
 GRID_SCALE = 2
 GRID_FRAMES = 40
 GRID_FPS = 20
-STAGE_MOODS = {"rocking", "rocking_calm", "rocking_tired", "fable_fight"}
-STAGE_KIND = {"fable_fight": "fire", "rocking_tired": "rockstill",
-              "rocking_calm": "rockstill"}
+STAGE_MOODS = {"rocking", "fable_fight"}
+STAGE_KIND = {"fable_fight": "fire"}
 STAGE_BG = (46, 24, 81, 255)
 # Fable fights on a dark field lit by fire; rocking plays on a purple stage.
 FIRE_BG = (18, 5, 4, 255)
@@ -77,9 +76,7 @@ def render(doc, frame, stage=False):
         else:
             img.paste(Image.new("RGBA", img.size, STAGE_BG), (0, 0))
             dr = ImageDraw.Draw(img, "RGBA")
-            # RockStill in ui.cpp: lights on, performer asleep. No pulse, and
-            # the grid sits at a fixed low opacity.
-            pulse = 0.3 if stage == "rockstill" else (0.9 if (frame % 15) < 7 else 0.25)
+            pulse = 0.9 if (frame % 15) < 7 else 0.25
             a = int(255 * pulse)
             for i in range(4):
                 p = int(w * SCALE * (i + 1) / 5)
