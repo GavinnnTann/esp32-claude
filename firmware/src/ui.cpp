@@ -47,7 +47,7 @@ const lv_color_t kFireGlow = lv_color_hex(0x8C261A);
 // beat four times per loop; see FABLE_STRIKES in tools/make_crab_lottie.py.
 constexpr uint32_t kStagePulseMs = 250;
 
-enum class Stage : uint8_t { None, Rock, RockStill, Fire };
+enum class Stage : uint8_t { None, Rock, Fire };
 Stage currentStage = Stage::None;
 
 // 96x96 = 36,864 bytes, and it must be ARGB8888 - lv_lottie_set_buffer hands
@@ -114,7 +114,7 @@ bool contains(const char *hay, size_t hay_len, const char *needle) {
 // Every model has its own pair, split at "high":
 //
 //   Fable   high+ fights a dragon     below  stands watch
-//   Opus    high+ rocks out           below  plays on, stage not pulsing
+//   Opus    high+ rocks out on stage  below  plays on, happily, on black
 //   Sonnet  high+ heads-down at desk  below  focused
 //   Haiku   high+ delighted           below  chilled
 //
@@ -371,11 +371,11 @@ void fire_mix_cb(void *var, int32_t v) {
 // against ~46KB of free heap - and drawing them natively is far cheaper than
 // making ThorVG rasterise them.
 Stage stage_for(CrabMood m) {
+  // The purple stage means one thing: Opus performing at high effort. The
+  // pulse is locked to the strum tempo, so it belongs to that performance and
+  // not to every appearance of the guitar - rocking_calm and rocking_tired
+  // both play on black.
   if (m == CRAB_ROCKING) return Stage::Rock;
-  // Opus below high effort, and the dozing rocker: stage lit but not pulsing.
-  // The pulse is locked to the strum tempo, so it belongs to the hard-effort
-  // performance, not to every appearance of the guitar.
-  if (m == CRAB_ROCKING_CALM || m == CRAB_ROCKING_TIRED) return Stage::RockStill;
   if (m == CRAB_FABLE_FIGHT) return Stage::Fire;
   // CRAB_FABLE_TIRED gets no fire: the dozing knight is not fighting anything.
   return Stage::None;
@@ -403,7 +403,7 @@ void set_stage(Stage kind) {
 
   lv_obj_remove_flag(stageBg, LV_OBJ_FLAG_HIDDEN);
   // Only the rock stages have a grid; fire is a bare wash.
-  const bool grid = (kind == Stage::Rock || kind == Stage::RockStill);
+  const bool grid = (kind == Stage::Rock);
   for (lv_obj_t *l : gridLines) {
     if (l == nullptr) continue;
     if (grid) {
@@ -411,15 +411,6 @@ void set_stage(Stage kind) {
     } else {
       lv_obj_add_flag(l, LV_OBJ_FLAG_HIDDEN);
     }
-  }
-
-  if (kind == Stage::RockStill) {
-    // Lights on, performer asleep. No animation at all, so this costs nothing
-    // to leave up.
-    lv_obj_set_style_bg_color(stageBg, kStageBg, LV_PART_MAIN);
-    grid_opa_cb(stageBg, LV_OPA_30);
-    currentStage = kind;
-    return;
   }
 
   lv_anim_t a;

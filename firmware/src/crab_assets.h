@@ -16,6 +16,7 @@ typedef enum {
     CRAB_CHILL,
     CRAB_SLEEPY,
     CRAB_ASLEEP,
+    CRAB_ROCKING_CALM,
     CRAB_ROCKING,
     CRAB_IDLE,
     CRAB_FABLE_CALM,
@@ -24,7 +25,6 @@ typedef enum {
     CRAB_ROCKING_TIRED,
     CRAB_FABLE_TIRED,
     CRAB_WORKING,
-    CRAB_ROCKING_CALM,
     CRAB_MOOD_COUNT,
 } CrabMood;
 
