@@ -520,9 +520,30 @@ def build(mood: str) -> dict:
     # by design; the blade and the fire stage carry the motion.
     dragon = []
     if m.get("dragon"):
+        # Three rects (head, snout, one round eye) read as a green blob. What
+        # actually makes this a dragon is the EYE and the SILHOUETTE: a slit
+        # pupil instead of a dot, a brow angled down towards the snout, and a
+        # horn breaking the outline.
+        #
+        # Only THREE shapes were added, and that is a measured limit, not
+        # timidity. A fuller version - two horns, a jaw, teeth, a nostril, ten
+        # shapes in all - dropped the fight scene to 11,444B free / 10,228B
+        # largest and wedged the device on `lv_draw_add_task: new_task != NULL
+        # (Out of memory)`. Every one of those shapes overlaps the head, and
+        # overlap is what ThorVG charges for; the detail cost ~3KB of heap per
+        # group. These three were the ones carrying the character.
         dragon = [
-            group("dreye", [rect(7, 7, 4), fill(DRAGON_EYE)], (65, 13)),
+            # Slit pupil: one rect, and the single biggest difference between
+            # "reptile" and "googly cartoon eye".
+            group("drpupil", [rect(2, 8, 1), fill(OUTLINE)], (65, 13)),
+            # Angled down towards the snout. Rotation is clockwise, so a
+            # NEGATIVE angle drops the left (inner) end - the same sign trap as
+            # the crab's own angry brows.
+            group("drbrow", [rect(12, 3, 1), fill(DRAGON_DARK)], (64, 8), static(-20)),
+            group("dreye", [rect(8, 8, 4), fill(DRAGON_EYE)], (65, 13)),
             group("drsnout", [rect(16, 9, 4), fill(DRAGON_DARK)], (52, 22)),
+            group("drhorn", [rect(4, 13, 2, offset=(0, -6)), fill(DRAGON_DARK)],
+                  (58, 8), static(-30)),
             group("drhead", [rect(26, 20, 9), fill(DRAGON)], (65, 16)),
         ]
 
