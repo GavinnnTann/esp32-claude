@@ -46,7 +46,7 @@ Every model has its own pair, split at `high` effort:
 
 | Model | below `high` | | `high` and above | |
 |---|---|---|---|---|
-| **Fable** | `fable_calm` — in a full plumed helm, standing watch on a black field | <img src="assets/crab-fable_calm.gif" width="90"> | `fable_fight` — swinging a burning sword at a dragon, firelight pulsing in time with every strike | <img src="assets/crab-fable_fight.gif" width="90"> |
+| **Fable** | `fable_calm` — in a full plumed helm, standing watch on a black field | <img src="assets/crab-fable_calm.gif" width="90"> | `fable_fight` — burning sword swung at a slit-eyed, horned dragon, firelight pulsing in time with every strike | <img src="assets/crab-fable_fight.gif" width="90"> |
 | **Opus** | `rocking_calm` — same guitar, played for the pleasure of it, on black | <img src="assets/crab-rocking_calm.gif" width="90"> | `rocking` — strums on a purple stage, the grid flashing to the beat (the stage means *this* and nothing else) | <img src="assets/crab-rocking.gif" width="90"> |
 | **Sonnet** | `focused` — hard angled brows, narrow eyes, almost no movement | <img src="assets/crab-focused.gif" width="90"> | `working` — hunched behind a laptop, typing, and now and then tilting the mug back for a drink | <img src="assets/crab-working.gif" width="90"> |
 | **Haiku** | `chill` — raised brows, wide eyes glancing aside, easy sway | <img src="assets/crab-chill.gif" width="90"> | `happy` — eyes shut in `^^` arcs, wide grin, blushing, bouncy | <img src="assets/crab-happy.gif" width="90"> |
@@ -76,10 +76,18 @@ character appearing.
 | coffee gone cold, claws resting on the keys | guitar unstrummed, lights out | shut behind the visor |
 
 Each is *cheaper* than the mood it replaces, not dearer — the busy motion is
-what costs. Moods with no set of their own (`focused`, `chill`, `happy`) fall
-back to the shared `sleepy`. 100% keeps the shared bed scene deliberately: the
-session is spent and the crab has stopped working, so leaving it slumped at its
-desk would say the opposite of what has happened.
+what costs.
+
+Moods with no set of their own — `focused`, `chill`, `happy` — fall back to the
+shared `sleepy` instead:
+
+| | |
+|---|---|
+| <img src="assets/crab-sleepy.gif" width="90"> | `sleepy` — heavy lids, drooping brows, a drifting `z` |
+
+100% keeps the shared bed scene deliberately: the session is spent and the crab
+has stopped working, so leaving it slumped at its desk would say the opposite of
+what has happened.
 
 Each mood is separated by a *categorical* feature — brow angle, eye shape, a
 prop — rather than by size. An earlier version varied only eye height (10 / 7 /
