@@ -522,16 +522,23 @@ def build(mood: str) -> dict:
     if m.get("dragon"):
         # Three rects (head, snout, one round eye) read as a green blob. What
         # actually makes this a dragon is the EYE and the SILHOUETTE: a slit
-        # pupil instead of a dot, a brow angled down towards the snout, and a
-        # horn breaking the outline.
+        # pupil instead of a dot, and a brow angled down towards the snout.
         #
-        # Only THREE shapes were added, and that is a measured limit, not
-        # timidity. A fuller version - two horns, a jaw, teeth, a nostril, ten
-        # shapes in all - dropped the fight scene to 11,444B free / 10,228B
-        # largest and wedged the device on `lv_draw_add_task: new_task != NULL
-        # (Out of memory)`. Every one of those shapes overlaps the head, and
-        # overlap is what ThorVG charges for; the detail cost ~3KB of heap per
-        # group. These three were the ones carrying the character.
+        # A horn used to sit here too (drhorn, x=58, rotated -30), right next
+        # to the brow (x=64, rotated -20). Two dark diagonal bars that close
+        # together but at different angles read as crossed/uneven rather than
+        # as "a brow plus a horn" - it looked like a mistake, not detail. The
+        # horn was the one removed rather than the brow: the brow is what
+        # angles towards the snout and ties the eye to the face, the horn was
+        # decoration.
+        #
+        # Only TWO shapes were added over the original three, and that is a
+        # measured limit, not timidity. A fuller version - two horns, a jaw,
+        # teeth, a nostril, ten shapes in all - dropped the fight scene to
+        # 11,444B free / 10,228B largest and wedged the device on
+        # `lv_draw_add_task: new_task != NULL (Out of memory)`. Every one of
+        # those shapes overlaps the head, and overlap is what ThorVG charges
+        # for; the detail cost ~3KB of heap per group.
         dragon = [
             # Slit pupil: one rect, and the single biggest difference between
             # "reptile" and "googly cartoon eye".
@@ -542,8 +549,6 @@ def build(mood: str) -> dict:
             group("drbrow", [rect(12, 3, 1), fill(DRAGON_DARK)], (64, 8), static(-20)),
             group("dreye", [rect(8, 8, 4), fill(DRAGON_EYE)], (65, 13)),
             group("drsnout", [rect(16, 9, 4), fill(DRAGON_DARK)], (52, 22)),
-            group("drhorn", [rect(4, 13, 2, offset=(0, -6)), fill(DRAGON_DARK)],
-                  (58, 8), static(-30)),
             group("drhead", [rect(26, 20, 9), fill(DRAGON)], (65, 16)),
         ]
 
