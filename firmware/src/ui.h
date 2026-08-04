@@ -6,13 +6,16 @@
 
 enum class ConnState { Fresh, Stale, Disconnected };
 
-// Views cycled with the two navigation buttons. Session first - it's the one
-// that actually runs out during a working session.
+// Views cycled with the two navigation buttons, and the order they appear in.
+// Mascot first because it is what the display is for at a glance - the crab
+// already carries session state in its mood and the arc colours the rim, and
+// the page now prints the session figure and reset time underneath, so being
+// first costs no information. Session/Weekly/Details follow for the detail.
 enum class View : uint8_t {
-  Session = 0,
+  Mascot = 0,
+  Session,
   Weekly,
   Details,
-  Mascot,
   _Count,
 };
 

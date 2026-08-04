@@ -20,6 +20,9 @@ lv_obj_t *pctLabel = nullptr;
 lv_obj_t *tokensLabel = nullptr;
 lv_obj_t *resetLabel = nullptr;
 lv_obj_t *footerLabel = nullptr;
+// Mascot page only, below the footer: the session figure spelled out, since
+// that page otherwise conveys it only as the arc's colour and length.
+lv_obj_t *mascotInfoLabel = nullptr;
 lv_obj_t *connDot = nullptr;
 lv_obj_t *pageDots[(int)View::_Count] = {};
 lv_obj_t *mascot = nullptr;
@@ -235,7 +238,7 @@ void apply_mood(CrabMood mood) {
                 (unsigned)a.size, (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
 }
 
-View currentView = View::Session;
+View currentView = View::Mascot;
 
 // Last state received, kept so a view switch can redraw immediately from
 // cached data instead of showing blank fields until the next BLE push, which
@@ -499,17 +502,47 @@ void render_view() {
       lv_obj_remove_flag(o, LV_OBJ_FLAG_HIDDEN);
     }
   }
-  if (onMascot) {
-    // Still colour the rim by session usage so the view carries meaning.
-    if (haveCached && cachedState.limits_ok) {
-      uint8_t pct = cachedState.session_pct > 100 ? 100 : cachedState.session_pct;
-      lv_arc_set_value(arc, pct);
-      lv_obj_set_style_arc_color(arc, color_for_pct(pct), LV_PART_INDICATOR);
+  // The extra caption belongs to the mascot page alone.
+  if (mascotInfoLabel != nullptr) {
+    if (onMascot) {
+      lv_obj_remove_flag(mascotInfoLabel, LV_OBJ_FLAG_HIDDEN);
+    } else {
+      lv_obj_add_flag(mascotInfoLabel, LV_OBJ_FLAG_HIDDEN);
     }
+  }
+
+  if (onMascot) {
+    char info[48];
+    if (!haveCached) {
+      snprintf(info, sizeof(info), "--");
+      lv_arc_set_value(arc, 0);
+    } else {
+      const UsageState &m = cachedState;
+      bool live = quota_window_current(m.session_reset);
+      // Same call the Session page makes, so the rim reads identically on both
+      // - including greying out when the cached figure has outlived its window.
+      // It also writes pctLabel, which is hidden here and harmless.
+      set_quota_view(m.session_pct, m.limits_ok && live);
+      if (m.limits_ok && live) {
+        char resetBuf[36];
+        format_reset_sgt(m.session_reset, resetBuf, sizeof(resetBuf));
+        uint8_t pct = m.session_pct > 100 ? 100 : m.session_pct;
+        snprintf(info, sizeof(info), "%u%%  %s", (unsigned)pct, resetBuf);
+      } else if (!live) {
+        snprintf(info, sizeof(info), "window reset - awaiting data");
+      } else {
+        snprintf(info, sizeof(info), "--");
+      }
+    }
+    lv_label_set_text(mascotInfoLabel, info);
     return;
   }
 
-  static const char *kTitles[] = {"SESSION", "WEEKLY", "TODAY"};
+  // Indexed by View, INCLUDING Mascot. Mascot returns above so its slot is
+  // never read, but sizing the table to _Count means reordering the enum can
+  // never silently shift these by one - which it would have done when Mascot
+  // moved to the front.
+  static const char *kTitles[(int)View::_Count] = {"", "SESSION", "WEEKLY", "TODAY"};
   lv_label_set_text(titleLabel, kTitles[(int)currentView]);
 
   if (!haveCached) {
@@ -642,7 +675,7 @@ void ui_init() {
   lv_obj_set_style_arc_color(arc, color_for_pct(0), LV_PART_INDICATOR);
 
   titleLabel = lv_label_create(scr);
-  lv_obj_set_style_text_font(titleLabel, &lv_font_montserrat_14, LV_PART_MAIN);
+  lv_obj_set_style_text_font(titleLabel, &lv_font_montserrat_16, LV_PART_MAIN);
   lv_obj_set_style_text_color(titleLabel, lv_palette_lighten(LV_PALETTE_GREY, 1), LV_PART_MAIN);
   lv_label_set_text(titleLabel, "SESSION");
   lv_obj_align(titleLabel, LV_ALIGN_CENTER, 0, -52);
@@ -653,21 +686,32 @@ void ui_init() {
   lv_obj_align(pctLabel, LV_ALIGN_CENTER, 0, -16);
 
   tokensLabel = lv_label_create(scr);
-  lv_obj_set_style_text_font(tokensLabel, &lv_font_montserrat_10, LV_PART_MAIN);
+  lv_obj_set_style_text_font(tokensLabel, &lv_font_montserrat_12, LV_PART_MAIN);
   lv_label_set_text(tokensLabel, "waiting for data");
   lv_obj_align(tokensLabel, LV_ALIGN_CENTER, 0, 16);
 
   resetLabel = lv_label_create(scr);
-  lv_obj_set_style_text_font(resetLabel, &lv_font_montserrat_10, LV_PART_MAIN);
+  lv_obj_set_style_text_font(resetLabel, &lv_font_montserrat_12, LV_PART_MAIN);
   lv_obj_set_style_text_color(resetLabel, lv_palette_lighten(LV_PALETTE_GREY, 1), LV_PART_MAIN);
   lv_label_set_text(resetLabel, "");
   lv_obj_align(resetLabel, LV_ALIGN_CENTER, 0, 34);
 
   footerLabel = lv_label_create(scr);
-  lv_obj_set_style_text_font(footerLabel, &lv_font_montserrat_10, LV_PART_MAIN);
+  lv_obj_set_style_text_font(footerLabel, &lv_font_montserrat_12, LV_PART_MAIN);
   lv_obj_set_style_text_color(footerLabel, lv_palette_lighten(LV_PALETTE_GREY, 1), LV_PART_MAIN);
   lv_label_set_text(footerLabel, "waiting to connect...");
   lv_obj_align(footerLabel, LV_ALIGN_CENTER, 0, 52);
+
+  // Sits between the footer (bottom edge ~+60) and the page dots (~+93). On a
+  // round 240px panel the arc ring cuts in at x = +-70 by this height, so the
+  // text has ~140px to work with - which is why it is the dimmer grey and the
+  // smaller font rather than matching the big centre readout.
+  mascotInfoLabel = lv_label_create(scr);
+  lv_obj_set_style_text_font(mascotInfoLabel, &lv_font_montserrat_12, LV_PART_MAIN);
+  lv_obj_set_style_text_color(mascotInfoLabel, lv_palette_darken(LV_PALETTE_GREY, 1), LV_PART_MAIN);
+  lv_label_set_text(mascotInfoLabel, "");
+  lv_obj_align(mascotInfoLabel, LV_ALIGN_CENTER, 0, 70);
+  lv_obj_add_flag(mascotInfoLabel, LV_OBJ_FLAG_HIDDEN);
 
   // Page indicator dots, so it's discoverable that other views exist.
   const int total = (int)View::_Count;
