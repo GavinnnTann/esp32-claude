@@ -26,12 +26,17 @@ whichever was fetched more recently:
 Preferring the fresher of the two means installing the status line is a pure
 improvement and removing it degrades gracefully, with no flag to keep in sync.
 
-Two more things to keep in mind:
+Three more things to keep in mind:
 
 - **Neither source is live.** `fetched_at` says when the numbers were last
   refreshed; if Claude Code isn't running, they freeze. We pass that timestamp
   through so the display can flag stale percentages rather than showing an old
   number as if it were current.
+- **`~/.claude.json` can go backwards.** Every concurrent Claude Code process
+  rewrites that file wholesale from its own in-memory copy, so an older
+  session's flush clobbers a newer one's and the cached figure regresses. See
+  `_monotonic`, which refuses to serve a reading older than one already
+  served.
 - **The percentages are not a linear function of ccusage's raw token counts.**
   Claude Code weights usage (longer contexts cost more even when cached), so
   deriving % from tokens would drift. Read the real value; don't recompute it.
@@ -134,6 +139,44 @@ def _read_statusline() -> _Source:
         return _Source()
 
 
+# Newest reading served for each window, as name -> (reading, fetched_at).
+#
+# Held in memory rather than on disk on purpose: the poll loop is a
+# long-running process, the rewind this guards against plays out over minutes
+# within one run, and a fresh start should simply take whatever the sources
+# currently say rather than pinning itself to a pre-restart value.
+_high_water: dict = {}
+
+
+def _monotonic(name: str, reading: Optional[tuple], at: int):
+    """Refuses to serve a reading older than the newest one already served.
+
+    ~/.claude.json is rewritten WHOLESALE by every concurrent Claude Code
+    process, each flushing its own in-memory copy of cachedUsageUtilization.
+    An older session's flush therefore clobbers a newer session's, and the
+    cache does not merely go stale - it goes BACKWARDS. Observed in host.log
+    oscillating between two fetch instants ~12 minutes apart for over 20
+    minutes, dragging the reported session figure from 57% down to 55% while
+    the true value was 86%.
+
+    Gating on the timestamp rather than on the percentage matters: when a
+    window rolls over, its real utilization drops to near zero, and that
+    arrives with a NEWER fetch time. Clamping the percentage upward would
+    freeze the display at the pre-reset figure until the process restarted.
+    """
+    prev = _high_water.get(name)
+    if reading is None:
+        # Nothing to serve. Deliberately does not resurrect the stored value:
+        # "no reading" must stay distinguishable from "an old reading", so the
+        # display can show the percentages as unavailable instead of showing a
+        # stale number as if it were current.
+        return None, 0
+    if prev is not None and at < prev[1]:
+        return prev
+    _high_water[name] = (reading, at)
+    return reading, at
+
+
 def read_usage_limits() -> UsageLimits:
     """Returns the freshest quota utilization available, window by window.
 
@@ -154,6 +197,10 @@ def read_usage_limits() -> UsageLimits:
 
     session, s_at = pick(live.session, live.fetched_at, cached.session, cached.fetched_at)
     week, w_at = pick(live.week, live.fetched_at, cached.week, cached.fetched_at)
+
+    # After the source pick, so a rewind is caught whichever source produced it.
+    session, s_at = _monotonic("session", session, s_at)
+    week, w_at = _monotonic("week", week, w_at)
 
     if session is None and week is None:
         return UsageLimits()
