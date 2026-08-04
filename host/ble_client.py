@@ -13,6 +13,7 @@ from typing import Callable
 
 from bleak import BleakClient, BleakScanner
 
+import config
 from usage_state import STRUCT_SIZE, TIME_SYNC_UUID, USAGE_STATE_UUID, UsageState
 
 DEVICE_NAME = "esp32-claude"
@@ -49,10 +50,26 @@ async def run_forever(poll_interval_s: float, get_state: Callable[[], UsageState
     the laptop sleeping/waking or the device rebooting are normal cases, not
     fatal ones (docs/handover.md section 5)."""
     while True:
-        print(f'[ble] scanning for "{DEVICE_NAME}"...')
-        device = await BleakScanner.find_device_by_name(DEVICE_NAME, timeout=SCAN_TIMEOUT_S)
+        expected = (config.DEVICE_ADDRESS or "").strip()
+        if expected:
+            print(f"[ble] scanning for {expected}...")
+            device = await BleakScanner.find_device_by_address(expected, timeout=SCAN_TIMEOUT_S)
+            missing = f"[ble] {expected} not found"
+        else:
+            print(f'[ble] scanning for "{DEVICE_NAME}"...')
+            device = await BleakScanner.find_device_by_name(DEVICE_NAME, timeout=SCAN_TIMEOUT_S)
+            missing = f'[ble] "{DEVICE_NAME}" not found'
+
         if device is None:
-            print(f'[ble] "{DEVICE_NAME}" not found, retrying in {RECONNECT_DELAY_S}s')
+            print(f"{missing}, retrying in {RECONNECT_DELAY_S}s")
+            await asyncio.sleep(RECONNECT_DELAY_S)
+            continue
+
+        # Belt and braces: find_device_by_address already filters, but the
+        # address is the thing being trusted, so it gets checked rather than
+        # assumed. Case-insensitive - backends differ on how they format it.
+        if expected and (device.address or "").lower() != expected.lower():
+            print(f"[ble] REFUSING {device.address}: expected {expected}")
             await asyncio.sleep(RECONNECT_DELAY_S)
             continue
 
@@ -80,7 +97,11 @@ async def run_forever(poll_interval_s: float, get_state: Callable[[], UsageState
             last_key = None
             last_push = 0.0
             while client.is_connected and not disconnected.is_set():
-                state = get_state()
+                # Off-thread even though ccusage_reader now refreshes in the
+                # background: this still globs the transcript directory and
+                # reads two JSON files, and anything synchronous here stalls
+                # the BLE stack's own keepalive and disconnect handling too.
+                state = await asyncio.to_thread(get_state)
 
                 # Push when anything the display shows has actually changed, or
                 # as a periodic heartbeat so the device's staleness indicator

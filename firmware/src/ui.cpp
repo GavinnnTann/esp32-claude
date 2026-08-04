@@ -779,7 +779,12 @@ void ui_set_connection(ConnState state, uint32_t age_seconds, bool haveData) {
 
   char buf[32];
   if (!haveData) {
-    snprintf(buf, sizeof(buf), state == ConnState::Disconnected ? "waiting to connect..." : "waiting for data...");
+    // "%s" rather than passing the ternary as the format itself: both arms are
+    // literals with no conversions so it was harmless, but a non-literal format
+    // trips -Wformat-nonliteral and is a bad habit to leave in a file that also
+    // formats data arriving over BLE.
+    snprintf(buf, sizeof(buf), "%s",
+             state == ConnState::Disconnected ? "waiting to connect..." : "waiting for data...");
   } else {
     char ageBuf[16];
     format_age(age_seconds, ageBuf, sizeof(ageBuf));

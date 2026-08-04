@@ -141,6 +141,24 @@ powershell -ExecutionPolicy Bypass -File host\install_autostart.ps1
 (Windows. Uses a Startup-folder shortcut, since registering a Scheduled Task
 needs admin. Remove with `-Uninstall`.)
 
+### Fresher quota numbers (optional but recommended)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File host\install_statusline.ps1
+```
+
+Installs a Claude Code **status line** that publishes the same rate limits
+`/usage` shows, every few seconds, to a file the host reads. Without it the
+display falls back to `~/.claude.json`, which is a cache Claude Code refreshes
+on its own irregular schedule — measured at 142 s old one moment and **47
+minutes** stale the next, which is long enough for the arc to look comfortable
+while the session is nearly spent.
+
+It only runs while a Claude Code session is open, and the numbers appear after
+that session's first response. That is fine: with nothing running, usage is not
+changing. Remove with `-Uninstall`; your previous `settings.json` is backed up
+beside it.
+
 ## How it works
 
 ```
@@ -164,6 +182,7 @@ Three data sources, because no single one has everything:
 | `ccusage daily` / `weekly` / `blocks` | token and cost totals |
 | `~/.claude.json` (`cachedUsageUtilization`) | the real quota %, and reset times |
 | `~/.claude/projects/**/*.jsonl` | current model and reasoning effort; its **mtime** is the idle clock |
+| status line → `%LOCALAPPDATA%/esp32-claude/rate_limits.json` | the same quota %, seconds old instead of minutes (optional) |
 
 Only the `effort` and `message.model` fields are read from transcripts — never
 conversation content. Idle detection needs no reading at all: the file's
@@ -217,6 +236,14 @@ Things that cost real debugging time here, in case they save you some:
   allocation appeared to fail with 10 KB "free".
 - **Quota percentages are weighted**, not proportional to tokens — long contexts
   cost more even when cached. Do not try to derive them.
+- **`cachedUsageUtilization` is irregular, not just delayed.** It is whatever
+  Claude Code last cached, so it can be seconds old or the better part of an
+  hour. If you need current numbers, take them from the `rate_limits` object
+  Claude Code hands **status line** scripts on stdin — documented, no token, and
+  re-run on a `refreshInterval` as low as 1 s.
+- **PowerShell prepends a UTF-8 BOM** when piping to a native command. A script
+  reading JSON on stdin must decode `utf-8-sig`, or it fails on the BOM and
+  looks like it silently did nothing.
 
 ## Credits
 

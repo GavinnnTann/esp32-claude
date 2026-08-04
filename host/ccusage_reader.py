@@ -1,9 +1,9 @@
 """Reads ccusage --json output and builds a UsageState.
 
 See docs/handover.md section 6. Two schema gotchas verified against a live
-`ccusage 20.0.19` install before writing this (pin this version — the doc
-that spec'd this project already flagged that behaviour drifts between
-releases, and it does):
+`ccusage 20.0.19` install before writing this — the doc that spec'd this
+project flagged that behaviour drifts between releases, and it does, so the
+version is now pinned in CCUSAGE_VERSION rather than left to the registry:
 
 - `daily` entries are flat (inputTokens, outputTokens, cacheCreationTokens,
   cacheReadTokens); `blocks[].tokenCounts` nests the same four counters under
@@ -17,7 +17,9 @@ releases, and it does):
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+import threading
 import time
 from datetime import datetime, timezone
 
@@ -30,18 +32,93 @@ class CcusageError(RuntimeError):
     pass
 
 
-def _run_ccusage(subcommand: str) -> dict:
-    # shell=True so `npx` resolves via PATHEXT (npx.cmd) on Windows without
-    # needing to hardcode an extension; subcommand is a fixed literal from
-    # this module, never user input, so this isn't an injection risk.
-    cmd = f"npx ccusage {subcommand} --json --offline"
-    result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+# Pinned on purpose. Bare `npx ccusage` resolves to whatever the registry
+# serves at that moment, and this module runs unattended every few minutes
+# from login (install_autostart.ps1), so a bad release would execute as the
+# logged-in user with no interaction. The two schema gotchas documented at the
+# top of this module were verified against exactly this version, so the pin
+# protects the parsing as well as the supply chain.
+#
+# For stronger integrity than a version pin, add a package.json plus lockfile
+# and run the local binary; that trades a setup step for hash verification.
+CCUSAGE_VERSION = "20.0.19"
+
+_npx_path: str | None = None
+
+
+def _resolve_npx() -> str:
+    """Absolute path to npx, resolved from ABSOLUTE PATH entries only.
+
+    Deliberately not shutil.which(): on Windows it prepends the current
+    directory to the search path and will happily return `.\\npx.CMD`. Verified
+    on 3.11.9 - it does this even when handed an explicit `path=` argument.
+
+    That matters here more than it usually would. install_autostart.ps1 sets
+    the shortcut's working directory to this repo, which lives in a synced
+    OneDrive folder, so anything able to write a file called npx.cmd there
+    would get executed at every login. Relative PATH entries - including the
+    empty string, which means "current directory" - are the whole vector, so
+    they are skipped rather than searched.
+    """
+    exts = [e for e in os.environ.get("PATHEXT", "").split(os.pathsep) if e]
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        if not entry or not os.path.isabs(entry):
+            continue
+        base = os.path.join(entry, "npx")
+        # PATHEXT candidates BEFORE the bare name. Node ships both `npx.cmd`
+        # and an extensionless `npx` (a POSIX sh script for Git Bash) in the
+        # same directory on Windows, and only the .cmd is executable by
+        # CreateProcess - preferring the bare name picks the one that cannot
+        # run. On POSIX, PATHEXT is empty and this falls through to `base`.
+        for cand in [base + e for e in exts] + [base]:
+            if os.path.isfile(cand) and os.access(cand, os.X_OK):
+                return cand
+    raise CcusageError("npx not found in any absolute PATH entry - is Node.js installed?")
+
+
+def _npx() -> str:
+    """Resolved once; the answer cannot change without the process restarting."""
+    global _npx_path
+    if _npx_path is None:
+        _npx_path = _resolve_npx()
+    return _npx_path
+
+
+def _invoke(subcommand: str, offline: bool) -> dict:
+    # A list with shell=False, so nothing goes through cmd.exe and the CWD is
+    # never part of resolving the executable. `--yes` because an unattended run
+    # must not block on npx's "install this package?" prompt.
+    cmd = [_npx(), "--yes", f"ccusage@{CCUSAGE_VERSION}", subcommand, "--json"]
+    if offline:
+        cmd.append("--offline")
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    shown = " ".join(cmd)
     if result.returncode != 0:
-        raise CcusageError(f"`{cmd}` failed (exit {result.returncode}): {result.stderr.strip()}")
+        raise CcusageError(f"`{shown}` failed (exit {result.returncode}): {result.stderr.strip()}")
     try:
         return json.loads(result.stdout)
     except json.JSONDecodeError as e:
-        raise CcusageError(f"`{cmd}` did not return valid JSON: {e}") from e
+        raise CcusageError(f"`{shown}` did not return valid JSON: {e}") from e
+
+
+def _run_ccusage(subcommand: str) -> dict:
+    """Live pricing by preference, bundled pricing as a fallback.
+
+    `--offline` used to be unconditional, and it silently zeroed the money.
+    Its bundled price table predates claude-opus-5, so a day spent entirely on
+    that model reported 19,950,033 tokens at a cost of $0.00 while ccusage's
+    own grand total was $1332.98. Dropping the flag prices the same day at
+    $17.86. Verified identical on 20.0.19 and on latest, so this was never
+    about the pinned version.
+
+    Falling back rather than just removing the flag: live pricing is a network
+    fetch, and on a machine that is offline the token counts are still worth
+    having even when the cost beside them is stale.
+    """
+    try:
+        return _invoke(subcommand, offline=False)
+    except CcusageError:
+        return _invoke(subcommand, offline=True)
 
 
 def _sum_four(entry: dict, keys: tuple[str, str, str, str]) -> int:
@@ -51,21 +128,36 @@ def _sum_four(entry: dict, keys: tuple[str, str, str, str]) -> int:
 _FLAT_TOKEN_KEYS = ("inputTokens", "outputTokens", "cacheCreationTokens", "cacheReadTokens")
 
 # ccusage runs are slow: three `npx` subprocess spawns that each re-scan every
-# transcript, several seconds total. The quota percentages, by contrast, come
-# from a single local JSON read costing microseconds. Caching the ccusage half
-# lets the caller poll frequently for fresh percentages without paying for
-# subprocesses every time.
+# transcript. Measured at ~130s PER CALL against a large history, so a full
+# refresh is minutes, not the "several seconds" this comment used to claim.
+# The quota percentages, by contrast, come from a single local JSON read
+# costing microseconds. Caching the ccusage half lets the caller poll
+# frequently for fresh percentages without paying for subprocesses every time.
 _CCUSAGE_TTL_S = 300
 _ccusage_cache: dict | None = None
 _ccusage_cache_at: float = 0.0
 
+# Guards the two above. A refresh now runs on its own thread, so the poll loop
+# and the refresher genuinely touch these concurrently.
+_ccusage_lock = threading.Lock()
+_ccusage_refreshing = False
 
-def _ccusage_totals() -> dict:
-    """Token/cost totals from ccusage, cached for _CCUSAGE_TTL_S."""
-    global _ccusage_cache, _ccusage_cache_at
-    if _ccusage_cache is not None and (time.monotonic() - _ccusage_cache_at) < _CCUSAGE_TTL_S:
-        return _ccusage_cache
+# Served until the first refresh lands. Indistinguishable on the wire from a
+# genuine zero, which is acceptable here: a fresh start with no usage recorded
+# yet really is zero, and the quota arc - the number that matters - is correct
+# from the first push regardless.
+_ZERO_TOTALS = {
+    "day_tokens": 0,
+    "day_cents": 0,
+    "week_tokens": 0,
+    "week_cents": 0,
+    "block_tokens": 0,
+    "block_cents": 0,
+}
 
+
+def _fetch_totals() -> dict:
+    """The expensive part. Three subprocess spawns, minutes on a large history."""
     daily = _run_ccusage("daily")
     weekly = _run_ccusage("weekly")
     blocks = _run_ccusage("blocks")
@@ -107,7 +199,7 @@ def _ccusage_totals() -> dict:
         block_tokens = 0
         block_cents = 0
 
-    _ccusage_cache = {
+    return {
         "day_tokens": day_tokens,
         "day_cents": day_cents,
         "week_tokens": week_tokens,
@@ -115,8 +207,63 @@ def _ccusage_totals() -> dict:
         "block_tokens": block_tokens,
         "block_cents": block_cents,
     }
-    _ccusage_cache_at = time.monotonic()
-    return _ccusage_cache
+
+
+def _store(totals: dict) -> None:
+    global _ccusage_cache, _ccusage_cache_at
+    with _ccusage_lock:
+        _ccusage_cache = totals
+        _ccusage_cache_at = time.monotonic()
+
+
+def _refresh_in_background() -> None:
+    global _ccusage_refreshing
+    try:
+        _store(_fetch_totals())
+    except Exception as e:
+        # A failed refresh keeps the previous figures rather than taking the
+        # display down; the next expiry simply tries again. Broad by intent -
+        # this runs on a thread with nobody to propagate to.
+        print(f"[ccusage] background refresh failed, keeping previous totals: {e}")
+    finally:
+        with _ccusage_lock:
+            _ccusage_refreshing = False
+
+
+def _ccusage_totals() -> dict:
+    """Last known token/cost totals, refreshed off-thread. Never blocks.
+
+    Stale-while-revalidate rather than refresh-on-demand. The old version
+    recomputed inline the moment the TTL expired, and since read_usage_state()
+    is called from the BLE poll loop, every expiry stopped the display dead for
+    the duration - host.log showed repeated 11.5 MINUTE gaps between pushes
+    against a 300s TTL, so the loop spent more time blocked than running.
+
+    The first call does NOT block either, which matters more than it looks:
+    esp32-claude.py calls read_usage_state() once before starting the BLE loop,
+    so a blocking first fetch delays the CONNECTION by minutes and the display
+    sits on "waiting to connect" the whole time. Returning zeros immediately
+    gets the link up in seconds instead.
+
+    Zeros are the right trade because of WHICH numbers these are. Token and
+    cost totals are a secondary view and already up to 5 minutes stale by
+    design; the quota percentages people actually watch come from
+    usage_limits.py on every call and never touch this path. So the arc is
+    correct within seconds of startup and only the token counters lag.
+    """
+    global _ccusage_refreshing
+    with _ccusage_lock:
+        cached = _ccusage_cache
+        fresh = cached is not None and (time.monotonic() - _ccusage_cache_at) < _CCUSAGE_TTL_S
+        # Only one refresh in flight; a second would just duplicate the work.
+        start = not fresh and not _ccusage_refreshing
+        if start:
+            _ccusage_refreshing = True
+
+    if start:
+        threading.Thread(target=_refresh_in_background, name="ccusage-refresh",
+                         daemon=True).start()
+    return cached if cached is not None else _ZERO_TOTALS
 
 
 def read_usage_state() -> UsageState:
