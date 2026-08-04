@@ -84,11 +84,13 @@ def _npx() -> str:
     return _npx_path
 
 
-def _run_ccusage(subcommand: str) -> dict:
+def _invoke(subcommand: str, offline: bool) -> dict:
     # A list with shell=False, so nothing goes through cmd.exe and the CWD is
     # never part of resolving the executable. `--yes` because an unattended run
     # must not block on npx's "install this package?" prompt.
-    cmd = [_npx(), "--yes", f"ccusage@{CCUSAGE_VERSION}", subcommand, "--json", "--offline"]
+    cmd = [_npx(), "--yes", f"ccusage@{CCUSAGE_VERSION}", subcommand, "--json"]
+    if offline:
+        cmd.append("--offline")
     result = subprocess.run(cmd, capture_output=True, text=True)
     shown = " ".join(cmd)
     if result.returncode != 0:
@@ -97,6 +99,26 @@ def _run_ccusage(subcommand: str) -> dict:
         return json.loads(result.stdout)
     except json.JSONDecodeError as e:
         raise CcusageError(f"`{shown}` did not return valid JSON: {e}") from e
+
+
+def _run_ccusage(subcommand: str) -> dict:
+    """Live pricing by preference, bundled pricing as a fallback.
+
+    `--offline` used to be unconditional, and it silently zeroed the money.
+    Its bundled price table predates claude-opus-5, so a day spent entirely on
+    that model reported 19,950,033 tokens at a cost of $0.00 while ccusage's
+    own grand total was $1332.98. Dropping the flag prices the same day at
+    $17.86. Verified identical on 20.0.19 and on latest, so this was never
+    about the pinned version.
+
+    Falling back rather than just removing the flag: live pricing is a network
+    fetch, and on a machine that is offline the token counts are still worth
+    having even when the cost beside them is stale.
+    """
+    try:
+        return _invoke(subcommand, offline=False)
+    except CcusageError:
+        return _invoke(subcommand, offline=True)
 
 
 def _sum_four(entry: dict, keys: tuple[str, str, str, str]) -> int:
