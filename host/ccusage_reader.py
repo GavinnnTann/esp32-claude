@@ -84,14 +84,29 @@ def _npx() -> str:
     return _npx_path
 
 
+# Suppresses the console window CreateProcess would otherwise open. Windows
+# only, 0 elsewhere so the call below stays portable.
+#
+# Needed because dropping shell=True lost something that was never obvious:
+# CPython sets STARTF_USESHOWWINDOW/SW_HIDE *only* on the shell=True path, so
+# the old code was hiding its console by accident. npx is a .cmd, which
+# CreateProcess runs by launching cmd.exe regardless of shell=, and under
+# pythonw.exe - which has no console to inherit - each of those got a visible
+# window. Three per refresh, every five minutes, popping up over whatever the
+# user was doing.
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+
 def _invoke(subcommand: str, offline: bool) -> dict:
-    # A list with shell=False, so nothing goes through cmd.exe and the CWD is
-    # never part of resolving the executable. `--yes` because an unattended run
-    # must not block on npx's "install this package?" prompt.
+    # A list with shell=False. cmd.exe is still involved - npx is a batch file
+    # - but the path handed to it is ABSOLUTE, which is the property that
+    # matters: nothing is resolved against the current directory. `--yes`
+    # because an unattended run must not block on npx's install prompt.
     cmd = [_npx(), "--yes", f"ccusage@{CCUSAGE_VERSION}", subcommand, "--json"]
     if offline:
         cmd.append("--offline")
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True,
+                            creationflags=_NO_WINDOW)
     shown = " ".join(cmd)
     if result.returncode != 0:
         raise CcusageError(f"`{shown}` failed (exit {result.returncode}): {result.stderr.strip()}")
