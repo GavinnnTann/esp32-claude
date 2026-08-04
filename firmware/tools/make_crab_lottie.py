@@ -151,6 +151,19 @@ MOODS: dict[str, dict] = {
     # motion, and the body bob is what makes an asset expensive (see below).
     "working": dict(eye="squint", brow="furrow", pupil_dx=0, mouth="flat",  wave=0,  bob=0,
                     speed=0.9, desk=True, body_dy=14, loop=180, sip=True),
+    # Waving hello, for a README header rather than the display.
+    #
+    # readme_only keeps it OUT of crab_assets.c: the firmware picks moods from
+    # model/effort/quota and has no state this would ever map to, so shipping it
+    # would be flash spent on something unreachable. main() still writes its
+    # JSON, which is all render_previews.py needs.
+    #
+    # Borrows happy's face wholesale - arc eyes, grin, blush - because the point
+    # of the mood is the gesture, and inventing a new expression alongside a new
+    # pose would just make it a second happy that reads slightly wrong. `hi`
+    # raises the right claw beside the head and sweeps it; see the claw branch.
+    "hi": dict(eye="happy", brow=None, pupil_dx=0, mouth="grin", wave=9, bob=3,
+               speed=1.0, blush=True, hi=True, readme_only=True),
 }
 
 ZZZ_COLOR = [0.949, 0.949, 0.980]
@@ -432,6 +445,33 @@ def build(mood: str) -> dict:
             group("guard", [rect(14, 5, 2, offset=(0, -3)), fill(STEEL_DARK)], (sx, sy),
                   swing_sword),
             group("claw_sword", [rect(11, 9, 4), fill(SHELL_DARK)], (sx, sy), swing_sword),
+        ]
+    elif m.get("hi"):
+        # One claw up beside the head sweeping a wide arc, the other left down
+        # doing the ordinary idle swing. Both raised read as a cheer, not a
+        # wave, and matching the two swings read as a shrug - the asymmetry is
+        # what makes it legible as a greeting.
+        #
+        # The shell is 44x32 centred at y=44, so its top edge is y=28 and its
+        # right edge is x=62. The raised claw has to OVERLAP that corner, not
+        # clear it: there is no arm drawn in this chibi build - the claws just
+        # hover at the sides - so a claw parked outside the silhouette reads as
+        # a detached blob rather than a raised arm. Rendered at (cx+19, 26) it
+        # did exactly that; pulling it in to (cx+16, 30) keeps it touching the
+        # shell while still sitting well above the resting claw at y=46, which
+        # is what makes the pose read as raised.
+        #
+        # 28 degrees against the idle swing's single digits. A wave is a bigger
+        # motion than a sway, and below about 20 the two claws just looked out
+        # of sync with each other instead of doing different things.
+        hi_a = 28
+        hi_swing = anim([(q[0], [-hi_a]), (q[1], [hi_a]), (q[2], [-hi_a]),
+                         (q[3], [hi_a]), (q[4], [-hi_a])])
+        limbs = [
+            group("claw_l", [rect(16, 14, 5, offset=(-8, 0)), fill(SHELL_DARK)],
+                  (cx - 18, 46 - dy), swing(1)),
+            group("claw_r", [rect(16, 14, 5, offset=(8, 0)), fill(SHELL_DARK)],
+                  (cx + 16, 30 - dy), hi_swing),
         ]
     else:
         # Asleep tucks the claws down against the body instead of holding them out.
@@ -790,9 +830,17 @@ def main(argv: list[str]) -> int:
     for mood in MOODS:
         data = json.dumps(build(mood), separators=(",", ":")).encode("utf-8")
         json.loads(data)  # fail here rather than silently rendering nothing on device
-        blobs[mood] = data
         if dump_json:
             (dump_json / f"crab_{mood}.json").write_bytes(data)
+        # readme_only moods are rendered to JSON for documentation images but
+        # never compiled in - the firmware has no state that would select them,
+        # so they would be flash spent on something unreachable. Keeping the
+        # filter here rather than in emit_c means the enum in crab_assets.h
+        # stays exactly the set the firmware can actually show.
+        if MOODS[mood].get("readme_only"):
+            print(f"  {mood:<8} {len(data):>6,} B  (readme only, not in firmware)")
+            continue
+        blobs[mood] = data
         print(f"  {mood:<8} {len(data):>6,} B")
 
     emit_c(blobs, here / "src" / "crab_assets.c", here / "src" / "crab_assets.h")
