@@ -120,6 +120,19 @@ _ccusage_cache_at: float = 0.0
 _ccusage_lock = threading.Lock()
 _ccusage_refreshing = False
 
+# Served until the first refresh lands. Indistinguishable on the wire from a
+# genuine zero, which is acceptable here: a fresh start with no usage recorded
+# yet really is zero, and the quota arc - the number that matters - is correct
+# from the first push regardless.
+_ZERO_TOTALS = {
+    "day_tokens": 0,
+    "day_cents": 0,
+    "week_tokens": 0,
+    "week_cents": 0,
+    "block_tokens": 0,
+    "block_cents": 0,
+}
+
 
 def _fetch_totals() -> dict:
     """The expensive part. Three subprocess spawns, minutes on a large history."""
@@ -196,7 +209,7 @@ def _refresh_in_background() -> None:
 
 
 def _ccusage_totals() -> dict:
-    """Last known token/cost totals, refreshed off-thread once stale.
+    """Last known token/cost totals, refreshed off-thread. Never blocks.
 
     Stale-while-revalidate rather than refresh-on-demand. The old version
     recomputed inline the moment the TTL expired, and since read_usage_state()
@@ -204,32 +217,31 @@ def _ccusage_totals() -> dict:
     the duration - host.log showed repeated 11.5 MINUTE gaps between pushes
     against a 300s TTL, so the loop spent more time blocked than running.
 
-    Serving the previous figures for one extra cycle costs nothing anyone can
-    see: they are token counts on a secondary view, already up to 5 minutes old
-    by design. The numbers people actually watch - the quota percentages - are
-    read fresh on every call and never touch this path.
+    The first call does NOT block either, which matters more than it looks:
+    esp32-claude.py calls read_usage_state() once before starting the BLE loop,
+    so a blocking first fetch delays the CONNECTION by minutes and the display
+    sits on "waiting to connect" the whole time. Returning zeros immediately
+    gets the link up in seconds instead.
+
+    Zeros are the right trade because of WHICH numbers these are. Token and
+    cost totals are a secondary view and already up to 5 minutes stale by
+    design; the quota percentages people actually watch come from
+    usage_limits.py on every call and never touch this path. So the arc is
+    correct within seconds of startup and only the token counters lag.
     """
     global _ccusage_refreshing
     with _ccusage_lock:
         cached = _ccusage_cache
         fresh = cached is not None and (time.monotonic() - _ccusage_cache_at) < _CCUSAGE_TTL_S
         # Only one refresh in flight; a second would just duplicate the work.
-        start = cached is not None and not fresh and not _ccusage_refreshing
+        start = not fresh and not _ccusage_refreshing
         if start:
             _ccusage_refreshing = True
-
-    if cached is None:
-        # Nothing cached yet, so there is nothing to serve while revalidating.
-        # The very first call blocks, which keeps startup showing real numbers
-        # instead of zeros; every refresh after this one happens off to the side.
-        totals = _fetch_totals()
-        _store(totals)
-        return totals
 
     if start:
         threading.Thread(target=_refresh_in_background, name="ccusage-refresh",
                          daemon=True).start()
-    return cached
+    return cached if cached is not None else _ZERO_TOTALS
 
 
 def read_usage_state() -> UsageState:
